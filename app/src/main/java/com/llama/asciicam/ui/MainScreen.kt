@@ -260,18 +260,25 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
             exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(220)),
             modifier = Modifier.align(Alignment.CenterEnd),
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(0.5f)
-                    .background(Color.Black)
-                    .padding(WindowInsets.statusBars.asPaddingValues())
-                    .padding(WindowInsets.navigationBars.asPaddingValues()),
-            ) {
-                // Force a dark scheme with explicit white text here regardless of
-                // system theme, since the panel's background is unconditionally black.
-                MaterialTheme(colorScheme = SettingsPanelColors) {
-                    SettingsPanel(
+            // Force a dark scheme AND use Surface (not a plain Box) here: Surface
+            // is what actually sets the default text/icon color for its content
+            // via LocalContentColor — a Box with a background modifier does not,
+            // which is why text was rendering in its unset default (black) on
+            // this panel's black background.
+            MaterialTheme(colorScheme = SettingsPanelColors) {
+                androidx.compose.material3.Surface(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(0.5f),
+                    color = Color.Black,
+                    contentColor = Color.White,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(WindowInsets.statusBars.asPaddingValues())
+                            .padding(WindowInsets.navigationBars.asPaddingValues()),
+                    ) {
+                        SettingsPanel(
                         settings = settings,
                         onSettingsChange = { transform -> viewModel.updateSettings(transform) },
                         onPickImage = {
@@ -288,7 +295,8 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                             }
                         },
                         onClose = { showSettings = false },
-                    )
+                        )
+                    }
                 }
             }
         }
