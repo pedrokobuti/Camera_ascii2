@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -64,6 +63,20 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.llama.asciicam.pipeline.AsciiCanvas
 import com.llama.asciicam.pipeline.MediaSource
 import kotlinx.coroutines.launch
+
+/** Explicit white-on-black scheme for the settings panel — the panel's
+ * background is unconditionally black, so its text/icon colors shouldn't
+ * follow the system light/dark scheme (whose "light" variant is dark-on-light
+ * and would be unreadable here). */
+private val SettingsPanelColors = darkColorScheme(
+    primary = Color(0xFF5B8CFF),
+    background = Color.Black,
+    surface = Color.Black,
+    onBackground = Color.White,
+    onSurface = Color.White,
+    onSurfaceVariant = Color.White,
+    onPrimary = Color.White,
+)
 
 /**
  * Full-bleed viewfinder with stock-camera-app chrome: translucent top/bottom
@@ -250,14 +263,14 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
-                    .widthIn(max = 340.dp)
+                    .fillMaxWidth(0.5f)
                     .background(Color.Black)
                     .padding(WindowInsets.statusBars.asPaddingValues())
                     .padding(WindowInsets.navigationBars.asPaddingValues()),
             ) {
-                // Force a dark scheme here regardless of system theme, so text
-                // stays legible against the panel's deliberately black background.
-                MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF5B8CFF))) {
+                // Force a dark scheme with explicit white text here regardless of
+                // system theme, since the panel's background is unconditionally black.
+                MaterialTheme(colorScheme = SettingsPanelColors) {
                     SettingsPanel(
                         settings = settings,
                         onSettingsChange = { transform -> viewModel.updateSettings(transform) },
