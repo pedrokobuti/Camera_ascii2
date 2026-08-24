@@ -6,7 +6,13 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +21,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,9 +40,9 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,7 +96,6 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
     val geometry = renderState?.geometry
 
     var showSettings by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val scope = rememberCoroutineScope()
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
@@ -215,26 +222,62 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
         }
     }
 
-    if (showSettings) {
-        ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = sheetState) {
-            SettingsPanel(
-                settings = settings,
-                onSettingsChange = { transform -> viewModel.updateSettings(transform) },
-                onPickImage = {
-                    imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
-                onExportPng = {
-                    viewModel.exportPng(context, 1080, 1440) { ok ->
-                        Toast.makeText(context, if (ok) "Saved PNG to Pictures/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onExportTxt = {
-                    viewModel.exportTxt(context) { ok ->
-                        Toast.makeText(context, if (ok) "Saved TXT to Documents/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onClose = { showSettings = false },
+    // Side panel instead of a full-width bottom sheet, so the viewfinder stays
+    // visible (and live) behind it while adjusting settings.
+    Box(modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = showSettings,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    ) { showSettings = false },
             )
+        }
+
+        AnimatedVisibility(
+            visible = showSettings,
+            enter = slideInHorizontally(tween(220)) { it } + fadeIn(tween(220)),
+            exit = slideOutHorizontally(tween(220)) { it } + fadeOut(tween(220)),
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .widthIn(max = 340.dp)
+                    .background(Color.Black)
+                    .padding(WindowInsets.statusBars.asPaddingValues())
+                    .padding(WindowInsets.navigationBars.asPaddingValues()),
+            ) {
+                // Force a dark scheme here regardless of system theme, so text
+                // stays legible against the panel's deliberately black background.
+                MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF5B8CFF))) {
+                    SettingsPanel(
+                        settings = settings,
+                        onSettingsChange = { transform -> viewModel.updateSettings(transform) },
+                        onPickImage = {
+                            imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onExportPng = {
+                            viewModel.exportPng(context, 1080, 1440) { ok ->
+                                Toast.makeText(context, if (ok) "Saved PNG to Pictures/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onExportTxt = {
+                            viewModel.exportTxt(context) { ok ->
+                                Toast.makeText(context, if (ok) "Saved TXT to Documents/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onClose = { showSettings = false },
+                    )
+                }
+            }
         }
     }
 }
