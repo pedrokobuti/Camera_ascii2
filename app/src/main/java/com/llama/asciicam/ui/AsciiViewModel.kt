@@ -68,6 +68,21 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var lastSrcW = 4
     @Volatile private var lastSrcH = 3
 
+    // Live viewfinder size in px, reported by AsciiCanvas via reportViewportSize().
+    // The noise source has no real footage to take an aspect ratio from, so it
+    // targets this instead of a fixed guess — otherwise (as originally shipped,
+    // hardcoded to 4:3) it renders a squarish patch instead of filling a phone's
+    // tall aspect ratio.
+    @Volatile private var viewportW = 9
+    @Volatile private var viewportH = 16
+
+    fun reportViewportSize(widthPx: Int, heightPx: Int) {
+        if (widthPx <= 0 || heightPx <= 0) return
+        if (viewportW == widthPx && viewportH == heightPx) return
+        viewportW = widthPx
+        viewportH = heightPx
+    }
+
     fun updateSettings(transform: (AsciiSettings) -> AsciiSettings) {
         val old = settings
         val new = transform(old)
@@ -179,8 +194,8 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
                 if (!s.noiseFrozen) noiseClock += dt.coerceIn(0f, 0.1f) * s.noiseSpeed
 
                 val charAspect = ensureCharAspect()
-                val srcW = com.llama.asciicam.pipeline.NoiseGenerators.NOISE_ASPECT_W
-                val srcH = com.llama.asciicam.pipeline.NoiseGenerators.NOISE_ASPECT_H
+                val srcW = viewportW
+                val srcH = viewportH
                 val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect)
                 val n = geom.cols * geom.rows
                 val rr = FloatArray(n); val gg = FloatArray(n); val bb = FloatArray(n)

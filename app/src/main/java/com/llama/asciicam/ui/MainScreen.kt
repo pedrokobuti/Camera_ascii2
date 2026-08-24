@@ -53,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -142,7 +143,9 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 geometry = geometry,
                 font = settings.font,
                 backgroundColor = Color.Black,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { viewModel.reportViewportSize(it.width, it.height) },
             )
             if (frame == null) {
                 Icon(

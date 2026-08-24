@@ -265,14 +265,20 @@ private fun LabeledSlider(
     }
 }
 
+// Stacked full-width, not a horizontal row: the settings panel is only half
+// the screen wide, and 3+ pill buttons side by side there don't have room to
+// stay on one line — Button/OutlinedButton don't truncate their label, so a
+// squeezed one wraps into a near-circular blob instead. Every option gets a
+// full-width row of its own here, and both selected/unselected states share
+// the same shape (ButtonDefaults.shape) so only the fill color differs.
 @Composable
 private fun <T> ChoiceRow(options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         options.forEach { (label, value) ->
             if (value == selected) {
-                Button(onClick = { onSelect(value) }) { Text(label) }
+                Button(onClick = { onSelect(value) }, modifier = Modifier.fillMaxWidth()) { Text(label) }
             } else {
-                OutlinedButton(onClick = { onSelect(value) }) { Text(label) }
+                OutlinedButton(onClick = { onSelect(value) }, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
         }
     }

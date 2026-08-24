@@ -36,7 +36,7 @@ data class PaletteStop(val hex: String)
 data class AsciiSettings(
     // Grid geometry
     val cols: Int = 110, // range 20..300
-    val fontSizePx: Float = 22f, // range ~8..128 (device-px equivalent of the web tool's 4..64 CSS px range)
+    val fontSizePx: Float = DEFAULT_FONT_SIZE_PX, // range ~8..128 (device-px equivalent of the web tool's 4..64 CSS px range)
     val lineSpacingPercent: Int = 50, // range 20..150
     val charSpacingPercent: Int = 100, // range 50..300
     val font: FontChoice = FontChoice.MONOSPACE,
@@ -93,5 +93,11 @@ data class AsciiSettings(
         // block merge, all on the JVM, no SIMD) comfortably inside a frame
         // budget on mid-range phones. Users can still raise it via the slider.
         const val CAMERA_DEFAULT_COLS = 40
+
+        // AsciiCanvas uses this as the reference point for its width-fill scale
+        // (see AsciiCanvas.kt) — at this font size the grid exactly fills the
+        // screen width for the current cols setting; raising/lowering fontSizePx
+        // from here is what makes the slider act as a zoom in/out control.
+        const val DEFAULT_FONT_SIZE_PX = 22f
     }
 }
