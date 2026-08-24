@@ -69,12 +69,13 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var lastSrcH = 3
 
     // Live viewfinder size in px, reported by AsciiCanvas via reportViewportSize().
-    // The noise source has no real footage to take an aspect ratio from, so it
-    // targets this instead of a fixed guess — otherwise (as originally shipped,
-    // hardcoded to 4:3) it renders a squarish patch instead of filling a phone's
-    // tall aspect ratio.
-    @Volatile private var viewportW = 9
-    @Volatile private var viewportH = 16
+    // Font size isn't a separate setting any more — computeGridGeometry solves
+    // for it from this width so the grid always fills the screen for whatever
+    // `cols` is set to, and the noise source uses it as its source aspect
+    // ratio too (it has no real footage to take one from otherwise). Defaults
+    // to a plausible full-HD-portrait guess until the first real layout pass.
+    @Volatile private var viewportW = 1080
+    @Volatile private var viewportH = 1920
 
     fun reportViewportSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0) return
@@ -151,7 +152,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
 
         val s = settings
         val charAspect = ensureCharAspect()
-        val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect)
+        val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat())
         // The caller already downsampled to (cols, rows) from the *previous* geometry
         // request; if geometry's row count differs (e.g. right after a cols change),
         // this frame's row count won't line up. Re-derive using the actually-supplied
@@ -177,7 +178,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     fun currentGridCols(): Int = settings.cols.coerceAtLeast(1)
     fun currentGridRows(): Int {
         val charAspect = ensureCharAspect()
-        return AsciiPipeline.computeGridGeometry(settings, lastSrcW, lastSrcH, charAspect).rows
+        return AsciiPipeline.computeGridGeometry(settings, lastSrcW, lastSrcH, charAspect, viewportW.toFloat()).rows
     }
 
     private fun manageNoiseLoop() {
@@ -196,7 +197,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
                 val charAspect = ensureCharAspect()
                 val srcW = viewportW
                 val srcH = viewportH
-                val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect)
+                val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat())
                 val n = geom.cols * geom.rows
                 val rr = FloatArray(n); val gg = FloatArray(n); val bb = FloatArray(n)
                 GridSources.sampleNoise(s.noiseType, geom.cols, geom.rows, noiseClock, s.noiseScale, rr, gg, bb)
@@ -214,7 +215,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Default) {
             val s = settings
             val charAspect = ensureCharAspect()
-            val geom = AsciiPipeline.computeGridGeometry(s, bmp.width, bmp.height, charAspect)
+            val geom = AsciiPipeline.computeGridGeometry(s, bmp.width, bmp.height, charAspect, viewportW.toFloat())
             val n = geom.cols * geom.rows
             val rr = FloatArray(n); val gg = FloatArray(n); val bb = FloatArray(n)
             GridSources.sampleBitmap(bmp, geom.cols, geom.rows, rr, gg, bb)

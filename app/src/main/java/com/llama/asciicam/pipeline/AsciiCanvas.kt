@@ -17,15 +17,12 @@ import androidx.compose.ui.graphics.nativeCanvas
  * shifting the draw baseline by the font's measured vertical-center offset
  * (see [GlyphMetrics.measureBaselineOffsetRatio]).
  *
- * Scaling: the grid is scaled so that at [AsciiSettings.DEFAULT_FONT_SIZE_PX]
- * it exactly fills the canvas width for the current `cols` setting — that
- * reference point, not the live `fontSizePx`, drives the fill scale. Moving
- * the font-size slider away from that reference then visibly zooms in
- * (bigger glyphs, grid overflows and gets cropped) or out (smaller glyphs,
- * grid shrinks inside the frame), centered on both axes. An earlier version
- * computed the fill scale directly from the live fontSizePx, which made the
- * slider a no-op: growing fontSizePx grew the content by exactly the factor
- * the fit-to-canvas scale then shrank it back by.
+ * No rescaling happens here: [GridGeometry.cellW]/[GridGeometry.fontSizePx]
+ * are already solved (in [AsciiPipeline.computeGridGeometry]) so that `cols`
+ * columns exactly span the live viewport width, so this draws 1:1 at that
+ * size. `rows` (from the source's aspect ratio) may not exactly match the
+ * viewport height, so the content is centered vertically and cropped
+ * (clipRect) if it overflows.
  */
 @Composable
 fun AsciiCanvas(
@@ -54,20 +51,12 @@ fun AsciiCanvas(
             val contentH = geometry.rows * geometry.rowPitch
             if (contentW <= 0f || contentH <= 0f || geometry.fontSizePx <= 0f) return@drawIntoCanvas
 
-            // cellW/rowPitch scale linearly with fontSizePx, so this ratio is the
-            // reference-font-size content width, independent of the live fontSizePx.
-            val referenceContentW = contentW * (AsciiSettings.DEFAULT_FONT_SIZE_PX / geometry.fontSizePx)
-            val fillScale = if (referenceContentW > 0f) size.width / referenceContentW else 1f
-
-            val scaledW = contentW * fillScale
-            val scaledH = contentH * fillScale
-            val offsetX = (size.width - scaledW) / 2f
-            val offsetY = (size.height - scaledH) / 2f
+            val offsetX = (size.width - contentW) / 2f
+            val offsetY = (size.height - contentH) / 2f
 
             val save = native.save()
             native.clipRect(0f, 0f, size.width, size.height)
             native.translate(offsetX, offsetY)
-            native.scale(fillScale, fillScale)
 
             val cols = geometry.cols
             val rows = geometry.rows

@@ -39,10 +39,14 @@ object GridSources {
         outG: FloatArray,
         outB: FloatArray,
     ) {
+        // Normalize cell coordinates to a fixed reference column count before handing
+        // them to the noise functions, so the on-screen feature size "Scale" produces
+        // doesn't change just because "Columns" did — see generateNoiseValue's doc.
+        val physScale = NoiseGenerators.REFERENCE_COLS / cols.coerceAtLeast(1)
         for (y in 0 until rows) {
             for (x in 0 until cols) {
                 val idx = y * cols + x
-                val v = NoiseGenerators.generateNoiseValue(type, x, y, timeSeconds, scale).coerceIn(0f, 1f)
+                val v = NoiseGenerators.generateNoiseValue(type, x, y, x * physScale, y * physScale, timeSeconds, scale).coerceIn(0f, 1f)
                 outR[idx] = v; outG[idx] = v; outB[idx] = v
             }
         }

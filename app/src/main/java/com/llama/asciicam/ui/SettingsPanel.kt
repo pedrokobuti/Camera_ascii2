@@ -109,8 +109,10 @@ fun SettingsPanel(
         }
 
         item { SectionLabel("Grid & font") }
+        // Font size isn't a separate control: the grid always fills the screen
+        // width for whatever "Columns" is set to (see AsciiPipeline.computeGridGeometry),
+        // so Columns alone is both the density and the zoom control.
         item { LabeledSlider("Columns", settings.cols.toFloat(), 20f, 300f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(cols = v.toInt()) } } }
-        item { LabeledSlider("Font size", settings.fontSizePx, 8f, 64f, valueLabel = { "${it.toInt()}px" }) { v -> set { it.copy(fontSizePx = v) } } }
         item { LabeledSlider("Line spacing %", settings.lineSpacingPercent.toFloat(), 20f, 150f, valueLabel = { "${it.toInt()}%" }) { v -> set { it.copy(lineSpacingPercent = v.toInt()) } } }
         item { LabeledSlider("Char spacing %", settings.charSpacingPercent.toFloat(), 50f, 300f, valueLabel = { "${it.toInt()}%" }) { v -> set { it.copy(charSpacingPercent = v.toInt()) } } }
         item {

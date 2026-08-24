@@ -176,12 +176,22 @@ object NoiseGenerators {
         return min(1f, max(0f, sum + 0.5f))
     }
 
-    /** x,y are grid-cell coordinates; t is the (speed-scaled) noise clock; scale is feature size. */
-    fun generateNoiseValue(type: NoiseType, x: Int, y: Int, t: Float, scale: Float): Float {
-        val nx = x / scale
-        val ny = y / scale
+    /**
+     * [cellX]/[cellY] are raw grid-cell coordinates (only WHITE uses these directly,
+     * one hashed value per cell by design — it's meant to look like per-pixel static
+     * regardless of grid resolution). [physX]/[physY] are cell coordinates normalized
+     * to a fixed reference column count (see [GridSources.sampleNoise]) so that the
+     * *visual* feature size the other noise types produce, driven by [scale], stays
+     * constant on screen as `cols` changes — otherwise the same `scale` value packs
+     * more or fewer noise cells into the same physical width depending on `cols`,
+     * and "changing Columns" would look like it's also changing the noise Scale.
+     * [t] is the (speed-scaled) noise clock.
+     */
+    fun generateNoiseValue(type: NoiseType, cellX: Int, cellY: Int, physX: Float, physY: Float, t: Float, scale: Float): Float {
+        val nx = physX / scale
+        val ny = physY / scale
         return when (type) {
-            NoiseType.WHITE -> noiseHash(x, y, floor(t * 8).toInt())
+            NoiseType.WHITE -> noiseHash(cellX, cellY, floor(t * 8).toInt())
             NoiseType.PERLIN -> perlin2D(nx + t * 0.3f, ny + t * 0.2f)
             NoiseType.SIMPLEX -> simplex2D(nx + t * 0.25f, ny - t * 0.18f)
             NoiseType.SPARSE -> sparseConvolution(nx + t * 0.3f, ny + t * 0.2f)
@@ -202,4 +212,9 @@ object NoiseGenerators {
 
     const val NOISE_ASPECT_W = 4
     const val NOISE_ASPECT_H = 3
+
+    /** Reference column count for [GridSources.sampleNoise]'s physical-coordinate
+     * normalization — matches [AsciiSettings.CAMERA_DEFAULT_COLS] so the default
+     * "Scale" behavior is unchanged from before this normalization was added. */
+    const val REFERENCE_COLS = 40f
 }

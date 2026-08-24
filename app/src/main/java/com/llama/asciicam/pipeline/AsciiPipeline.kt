@@ -100,16 +100,24 @@ class PipelineState {
  */
 object AsciiPipeline {
 
-    fun computeGridGeometry(settings: AsciiSettings, sourceWidth: Int, sourceHeight: Int, charAspect: Float): GridGeometry {
+    /**
+     * [viewportWidthPx] is the live on-screen viewfinder width. Font size is no
+     * longer a separate user setting — it's solved for here so the grid always
+     * fills exactly that width for the current `cols`, i.e. `cols` is now the
+     * only density/zoom control (more columns = smaller characters covering
+     * the same screen width, not a smaller image).
+     */
+    fun computeGridGeometry(settings: AsciiSettings, sourceWidth: Int, sourceHeight: Int, charAspect: Float, viewportWidthPx: Float): GridGeometry {
         val cols = settings.cols.coerceAtLeast(1)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
-        val baseCellW = settings.fontSizePx * charAspect
-        val cellW = baseCellW * charSpacingFactor
-        val rowPitch = (settings.fontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
+        val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
+        val baseCellW = cellW / charSpacingFactor
+        val fontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
+        val rowPitch = (fontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
         val srcAspect = if (sourceWidth > 0) sourceHeight.toFloat() / sourceWidth.toFloat() else 0.75f
         val rows = max(1, round(cols * srcAspect * (baseCellW / rowPitch)).toInt())
-        return GridGeometry(cols, rows, cellW, rowPitch, settings.fontSizePx)
+        return GridGeometry(cols, rows, cellW, rowPitch, fontSizePx)
     }
 
     fun process(
