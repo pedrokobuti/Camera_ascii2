@@ -92,6 +92,6 @@ data class AsciiSettings(
         // the per-frame CPU pipeline (color adjust + Sobel + char selection +
         // block merge, all on the JVM, no SIMD) comfortably inside a frame
         // budget on mid-range phones. Users can still raise it via the slider.
-        const val CAMERA_DEFAULT_COLS = 80
+        const val CAMERA_DEFAULT_COLS = 40
     }
 }
