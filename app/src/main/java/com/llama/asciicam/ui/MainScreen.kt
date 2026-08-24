@@ -68,7 +68,7 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
         if (uri != null) {
             scope.launch {
                 val bmp = loadBitmapFromUri(context, uri)
-                viewModel.setPickedImage(bmp)
+                viewModel.onImagePicked(bmp)
             }
         }
     }

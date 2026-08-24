@@ -89,7 +89,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun settingsAffectImageRerender(a: AsciiSettings, b: AsciiSettings): Boolean = a != b
 
-    fun setPickedImage(bitmap: Bitmap?) {
+    fun onImagePicked(bitmap: Bitmap?) {
         pickedImage = bitmap
         if (bitmap != null) {
             updateSettings { it.copy(mediaSource = MediaSource.IMAGE) }
