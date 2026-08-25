@@ -56,14 +56,14 @@ data class AsciiSettings(
     // Grid geometry. Font size isn't a separate setting: AsciiPipeline.computeGridGeometry
     // solves for it so the grid always fills the live viewport width for the
     // current `cols` — cols is the only density/zoom control.
-    val cols: Int = 110, // range 20..300
+    val cols: Int = 110, // range 20..180 — capped below the web tool's 300 (see AsciiPipeline.MAX_COLS)
     val lineSpacingPercent: Int = 50, // range 20..150
     val charSpacingPercent: Int = 100, // range 50..300
     val font: FontChoice = FontChoice.MODERN_DOS,
 
     // Character source
     val charSource: CharSource = CharSource.RAMP,
-    val rampString: String = " .:-=+*#%@",
+    val rampString: String = " .:-=+*#%@░▒▓",
     val wordString: String = "#LLAMA",
     val fillChars: String = ".+$",
     val stableWord: Boolean = false,

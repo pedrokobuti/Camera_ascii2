@@ -179,7 +179,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Grid size [CameraFrameAnalyzer] should target for its next frame (called off the main thread). */
-    fun currentGridCols(): Int = settings.cols.coerceAtLeast(1)
+    fun currentGridCols(): Int = settings.cols.coerceIn(1, AsciiPipeline.MAX_COLS)
     fun currentGridRows(): Int {
         val charAspect = ensureCharAspect()
         return AsciiPipeline.computeGridGeometry(settings, lastSrcW, lastSrcH, charAspect, viewportW.toFloat()).rows

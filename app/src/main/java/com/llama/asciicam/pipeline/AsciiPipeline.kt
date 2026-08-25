@@ -100,6 +100,13 @@ class PipelineState {
  */
 object AsciiPipeline {
 
+    /** Hard ceiling on grid columns, enforced here regardless of what's stored in
+     * [AsciiSettings.cols] — higher counts made the per-frame CPU pipeline (color
+     * adjust + Sobel + char selection + block merge, all on the JVM) miss its frame
+     * budget badly enough to crash on real devices. The Columns slider is capped
+     * to the same value, but this is the actual safety net. */
+    const val MAX_COLS = 180
+
     /**
      * [viewportWidthPx] is the live on-screen viewfinder width. Font size is no
      * longer a separate user setting — it's solved for here so the grid always
@@ -108,7 +115,7 @@ object AsciiPipeline {
      * the same screen width, not a smaller image).
      */
     fun computeGridGeometry(settings: AsciiSettings, sourceWidth: Int, sourceHeight: Int, charAspect: Float, viewportWidthPx: Float): GridGeometry {
-        val cols = settings.cols.coerceAtLeast(1)
+        val cols = settings.cols.coerceIn(1, MAX_COLS)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
         val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
