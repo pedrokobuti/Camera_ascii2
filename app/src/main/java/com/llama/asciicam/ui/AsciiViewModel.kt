@@ -18,6 +18,7 @@ import com.llama.asciicam.pipeline.GridSources
 import com.llama.asciicam.pipeline.MediaSource
 import com.llama.asciicam.pipeline.NoiseType
 import com.llama.asciicam.pipeline.PipelineState
+import com.llama.asciicam.pipeline.VideoRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -249,6 +250,59 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Default) {
             val ok = Export.saveTxt(context, snapshot.frame)
             withContext(Dispatchers.Main) { onDone(ok) }
+        }
+    }
+
+    var isRecording by mutableStateOf(false)
+        private set
+
+    private var videoRecorder: VideoRecorder? = null
+
+    /** Starts recording the live ASCII output to Movies/AsciiCam as an MP4.
+     * A no-op if already recording. [onStarted] reports whether setup
+     * (encoder/MediaStore) actually succeeded. */
+    fun startRecording(context: android.content.Context, onStarted: (Boolean) -> Unit) {
+        if (isRecording || videoRecorder != null) { onStarted(false); return }
+        viewModelScope.launch(Dispatchers.Default) {
+            val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            val recorder = VideoRecorder(
+                context = context,
+                font = settings.font,
+                backgroundArgb = bgArgb,
+                outWidth = 1080,
+                outHeight = 1440,
+                provideFrame = { render?.let { it.frame to it.geometry } },
+            )
+            val ok = recorder.start()
+            withContext(Dispatchers.Main) {
+                if (ok) {
+                    videoRecorder = recorder
+                    isRecording = true
+                }
+                onStarted(ok)
+            }
+        }
+    }
+
+    /** Stops an in-progress recording and finalizes the file. A no-op if not
+     * currently recording. */
+    fun stopRecording(onDone: (Boolean) -> Unit) {
+        val recorder = videoRecorder
+        if (recorder == null) { onDone(false); return }
+        videoRecorder = null
+        isRecording = false
+        viewModelScope.launch(Dispatchers.Default) {
+            recorder.stop()
+            withContext(Dispatchers.Main) { onDone(true) }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        videoRecorder?.let { r ->
+            // Best-effort: finalize on a plain thread since viewModelScope is
+            // already cancelled by the time onCleared() runs.
+            Thread { r.stop() }.start()
         }
     }
 }

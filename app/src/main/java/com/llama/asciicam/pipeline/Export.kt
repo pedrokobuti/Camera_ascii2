@@ -13,9 +13,9 @@ import java.util.Locale
 
 /**
  * Export helpers: render the current [AsciiFrameResult] to a PNG bitmap
- * (mirrors the original tool's PNG snapshot export) or a raw row-major
- * character grid (mirrors its .txt export). No live video/GIF exporter —
- * out of scope for a live camera viewfinder app.
+ * (mirrors the original tool's PNG snapshot export), a raw row-major
+ * character grid (mirrors its .txt export), or record it live to an MP4
+ * (see [VideoRecorder], which reuses [drawFrameInto] below).
  */
 object Export {
 
@@ -24,30 +24,30 @@ object Export {
         return "asciicam_$ts.$ext"
     }
 
-    /** Renders the frame into a standalone bitmap at [outWidth]x[outHeight] pixels. */
-    fun renderToBitmap(
-        context: Context,
+    /**
+     * Draws one frame onto an arbitrary [Canvas] at [outWidth]x[outHeight] —
+     * shared by [renderToBitmap] (a Bitmap-backed Canvas) and [VideoRecorder]
+     * (a video encoder's input Surface's locked Canvas), so a recorded frame
+     * looks exactly like a PNG snapshot of the same moment. [paint] and
+     * [baselineRatio] are precomputed by the caller (typeface loading and
+     * glyph-metrics measurement aren't free — a video recorder calls this
+     * once per frame and shouldn't redo them every time).
+     */
+    internal fun drawFrameInto(
+        canvas: Canvas,
         frame: AsciiFrameResult,
         geometry: GridGeometry,
-        font: FontChoice,
-        backgroundArgb: Int,
+        paint: Paint,
+        baselineRatio: Float,
         outWidth: Int,
         outHeight: Int,
-    ): Bitmap {
-        val bmp = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
+        backgroundArgb: Int,
+    ) {
         canvas.drawColor(backgroundArgb)
-
-        val typeface = GlyphMetrics.typefaceFor(context, font)
-        val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.typeface = typeface
-            textAlign = Paint.Align.CENTER
-        }
 
         val contentW = geometry.cols * geometry.cellW
         val contentH = geometry.rows * geometry.rowPitch
-        if (contentW <= 0f || contentH <= 0f) return bmp
+        if (contentW <= 0f || contentH <= 0f) return
         val scale = minOf(outWidth / contentW, outHeight / contentH)
         val offsetX = (outWidth - contentW * scale) / 2f
         val offsetY = (outHeight - contentH * scale) / 2f
@@ -74,6 +74,27 @@ object Export {
             }
         }
         canvas.restoreToCount(save)
+    }
+
+    /** Renders the frame into a standalone bitmap at [outWidth]x[outHeight] pixels. */
+    fun renderToBitmap(
+        context: Context,
+        frame: AsciiFrameResult,
+        geometry: GridGeometry,
+        font: FontChoice,
+        backgroundArgb: Int,
+        outWidth: Int,
+        outHeight: Int,
+    ): Bitmap {
+        val bmp = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val typeface = GlyphMetrics.typefaceFor(context, font)
+        val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.typeface = typeface
+            textAlign = Paint.Align.CENTER
+        }
+        drawFrameInto(canvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
         return bmp
     }
 

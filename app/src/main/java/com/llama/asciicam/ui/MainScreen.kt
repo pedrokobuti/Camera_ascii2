@@ -37,6 +37,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -108,6 +110,7 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
     val renderState = viewModel.render
     val frame = renderState?.frame
     val geometry = renderState?.geometry
+    val isRecording = viewModel.isRecording
 
     var showSettings by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -178,9 +181,27 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ChromeIconButton(icon = Icons.Default.Settings, contentDescription = "Settings") {
                         showSettings = true
+                    }
+                    if (isRecording) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Red),
+                            )
+                            Text(
+                                "REC",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
                     }
                     if (settings.mediaSource == MediaSource.CAMERA) {
                         ChromeIconButton(icon = Icons.Default.FlipCameraAndroid, contentDescription = "Switch camera") {
@@ -205,11 +226,28 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 )
 
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp, start = 32.dp, end = 32.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth().padding(top = 20.dp, start = 24.dp, end = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Left slot: secondary capture action (plain-text export).
+                    // Video record toggle.
+                    ChromeIconButton(
+                        icon = if (isRecording) Icons.Default.Stop else Icons.Default.Videocam,
+                        contentDescription = if (isRecording) "Stop recording" else "Record video",
+                        tint = if (isRecording) Color.Red else Color.White,
+                    ) {
+                        if (isRecording) {
+                            viewModel.stopRecording { ok ->
+                                Toast.makeText(context, if (ok) "Saved video to Movies/AsciiCam" else "Recording failed", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            viewModel.startRecording(context) { ok ->
+                                if (!ok) Toast.makeText(context, "Couldn't start recording", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+
+                    // Secondary capture action (plain-text export).
                     ChromeIconButton(icon = Icons.Default.Description, contentDescription = "Save as text") {
                         viewModel.exportTxt(context) { ok ->
                             Toast.makeText(context, if (ok) "Saved TXT to Documents/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
@@ -313,10 +351,11 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
 private fun ChromeIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String,
+    tint: Color = Color.White,
     onClick: () -> Unit,
 ) {
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = Color.White)
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = tint)
     }
 }
 
