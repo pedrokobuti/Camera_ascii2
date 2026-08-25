@@ -269,8 +269,8 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
                 context = context,
                 font = settings.font,
                 backgroundArgb = bgArgb,
-                outWidth = 1080,
-                outHeight = 1440,
+                requestedWidth = 1080,
+                requestedHeight = 1440,
                 provideFrame = { render?.let { it.frame to it.geometry } },
             )
             val ok = recorder.start()

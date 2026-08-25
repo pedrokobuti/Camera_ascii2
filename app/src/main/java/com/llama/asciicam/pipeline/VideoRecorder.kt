@@ -45,11 +45,22 @@ class VideoRecorder(
     private val context: Context,
     font: FontChoice,
     private val backgroundArgb: Int,
-    private val outWidth: Int,
-    private val outHeight: Int,
+    requestedWidth: Int,
+    requestedHeight: Int,
     private val provideFrame: () -> Pair<AsciiFrameResult, GridGeometry>?,
 ) {
     private val fps = 24
+
+    // H.264 hardware encoders operate on 16x16 macroblocks; a Surface-input
+    // size that isn't a multiple of 16 on both axes is a well-known source of
+    // on-device distortion (padding/scaling to the macroblock grid handled
+    // inconsistently across vendors) — e.g. the previously-hardcoded 1080 is
+    // NOT 16-aligned (1080/16 = 67.5) while 1440 happens to be, which line up
+    // with exactly the kind of severe text-shape distortion reported here.
+    // Align both dimensions up-front so every buffer (Bitmap, MediaFormat,
+    // Surface) agrees on the same, safe size.
+    private val outWidth = align16(requestedWidth)
+    private val outHeight = align16(requestedHeight)
 
     private val typeface = GlyphMetrics.typefaceFor(context, font)
     private val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
@@ -286,5 +297,6 @@ class VideoRecorder(
 
     companion object {
         private const val TAG = "VideoRecorder"
+        private fun align16(v: Int): Int = ((v + 15) / 16) * 16
     }
 }
