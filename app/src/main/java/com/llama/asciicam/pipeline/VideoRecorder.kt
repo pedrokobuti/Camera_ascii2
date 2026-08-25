@@ -2,6 +2,8 @@ package com.llama.asciicam.pipeline
 
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Paint
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -19,14 +21,21 @@ import java.util.Locale
 
 /**
  * Records the live ASCII output to an audio-less MP4. There's no camera/
- * screen frame to just forward — the "video" is synthesized by software-
- * drawing each frame directly onto a [MediaCodec] encoder's input Surface
- * (via [Surface.lockCanvas]/[Surface.unlockCanvasAndPost]), reusing
- * [Export.drawFrameInto] so a recorded frame looks exactly like a PNG
- * snapshot of the same moment. A dedicated thread resamples whatever
- * [provideFrame] currently returns at a fixed [fps] and feeds it in —
- * there's no separate rendering pass, it's the same data driving the live
- * viewfinder.
+ * screen frame to just forward — the "video" is synthesized frame by frame.
+ * Each frame is first rendered into a plain [Bitmap] via [Export.drawFrameInto]
+ * — the exact same call PNG export makes — and only that finished bitmap is
+ * blitted onto the [MediaCodec] encoder's input Surface (via
+ * [Surface.lockCanvas]/[Surface.unlockCanvasAndPost]). Drawing text directly
+ * on the encoder surface's own locked Canvas was tried first, but on-device
+ * that canvas didn't reliably honor the embedded custom typeface — it fell
+ * back toward a generic font, unlike a normal Bitmap-backed Canvas. Routing
+ * through a Bitmap first guarantees a recorded frame looks exactly like a PNG
+ * snapshot of the same moment, since only a trivial drawBitmap (no text)
+ * touches the encoder surface's canvas.
+ *
+ * A dedicated thread resamples whatever [provideFrame] currently returns at a
+ * fixed [fps] and feeds it in — there's no separate rendering pass, it's the
+ * same data driving the live viewfinder.
  *
  * [provideFrame] deliberately doesn't reference AsciiViewModel directly, to
  * keep this class decoupled from Compose/ViewModel plumbing — the caller
@@ -48,6 +57,12 @@ class VideoRecorder(
         this.typeface = typeface
         textAlign = Paint.Align.CENTER
     }
+
+    // Reused across frames — one frame's worth of scratch memory, not
+    // reallocated every ~40ms. Text is drawn into this (proven-correct)
+    // Bitmap canvas; the encoder surface only ever receives a plain blit.
+    private val frameBitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+    private val frameBitmapCanvas = Canvas(frameBitmap)
 
     private var codec: MediaCodec? = null
     private var muxer: MediaMuxer? = null
@@ -146,11 +161,12 @@ class VideoRecorder(
                 val current = provideFrame()
                 if (current != null) {
                     val (frame, geometry) = current
-                    val canvas = surface.lockCanvas(null)
+                    Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
+                    val surfaceCanvas = surface.lockCanvas(null)
                     try {
-                        Export.drawFrameInto(canvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
+                        surfaceCanvas.drawBitmap(frameBitmap, 0f, 0f, null)
                     } finally {
-                        surface.unlockCanvasAndPost(canvas)
+                        surface.unlockCanvasAndPost(surfaceCanvas)
                     }
                 }
                 nextFrameAt += frameIntervalMs
@@ -218,6 +234,7 @@ class VideoRecorder(
         try { muxer?.release() } catch (_: Exception) {}
         try { inputSurface?.release() } catch (_: Exception) {}
         try { pfd?.close() } catch (_: Exception) {}
+        try { frameBitmap.recycle() } catch (_: Exception) {}
 
         val u = uri
         if (u != null && muxerStarted) {
