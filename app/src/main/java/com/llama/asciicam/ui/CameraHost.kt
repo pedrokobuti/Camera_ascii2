@@ -79,6 +79,7 @@ fun CameraHost(
                     cols = { viewModel.currentGridCols() },
                     rows = { viewModel.currentGridRows() },
                     mirror = { useFrontCamera },
+                    targetAspect = { viewModel.currentViewportAspect() },
                 ) { r, g, b, cols, rows, srcW, srcH ->
                     viewModel.onCameraFrame(r, g, b, cols, rows, srcW, srcH)
                 },

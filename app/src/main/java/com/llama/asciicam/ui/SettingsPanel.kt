@@ -203,7 +203,7 @@ fun SettingsPanel(
         item { LabeledSlider("Exposure", settings.exposure.toFloat(), -100f, 100f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(exposure = v.toInt()) } } }
         item { LabeledSlider("Saturation", settings.saturation.toFloat(), 0f, 200f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(saturation = v.toInt()) } } }
         item { LabeledSlider("Gamma", settings.gamma.toFloat(), 20f, 300f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(gamma = v.toInt()) } } }
-        item { RowSwitch("Invert", settings.invert) { v -> set { it.copy(invert = v) } } }
+        item { RowSwitch("Invert ASCII", settings.invert) { v -> set { it.copy(invert = v) } } }
 
         item { SectionLabel("Color mode") }
         item {

@@ -84,6 +84,10 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         viewportH = heightPx
     }
 
+    /** height/width ratio of the live viewfinder — CameraFrameAnalyzer center-crops
+     * the sensor frame to this so the camera grid fills the whole screen. */
+    fun currentViewportAspect(): Float = viewportH.toFloat() / viewportW.coerceAtLeast(1)
+
     fun updateSettings(transform: (AsciiSettings) -> AsciiSettings) {
         val old = settings
         val new = transform(old)
@@ -229,8 +233,9 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         val snapshot = render
         if (snapshot == null) { onDone(false); return }
         viewModelScope.launch(Dispatchers.Default) {
+            val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
             val bmp = Export.renderToBitmap(
-                context, snapshot.frame, snapshot.geometry, settings.font, android.graphics.Color.BLACK, widthPx, heightPx,
+                context, snapshot.frame, snapshot.geometry, settings.font, bgArgb, widthPx, heightPx,
             )
             val ok = Export.savePng(context, bmp)
             bmp.recycle()

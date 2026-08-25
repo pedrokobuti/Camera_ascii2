@@ -14,11 +14,21 @@ import kotlin.math.max
  *
  * Reused buffers ([outR]/[outG]/[outB]) are grown, not reallocated, when the
  * grid size is stable across frames — the common case.
+ *
+ * Center-crops the (post-rotation) sensor frame to [targetAspect] (screen
+ * height/width) before downsampling — the camera sensor's own aspect ratio
+ * (often 4:3) rarely matches a phone's much taller screen, and without this
+ * crop the grid would only fill part of the viewport (matching the sensor's
+ * shape) instead of the whole screen, the way a normal camera app's
+ * viewfinder does. Reports the *cropped* dimensions as srcW/srcH so the
+ * pipeline's own aspect-ratio math (AsciiPipeline.computeGridGeometry) stays
+ * consistent with what was actually sampled.
  */
 class CameraFrameAnalyzer(
     private val cols: () -> Int,
     private val rows: () -> Int,
     private val mirror: () -> Boolean,
+    private val targetAspect: () -> Float,
     private val onFrame: (r: FloatArray, g: FloatArray, b: FloatArray, cols: Int, rows: Int, srcW: Int, srcH: Int) -> Unit,
 ) : ImageAnalysis.Analyzer {
 
@@ -76,6 +86,25 @@ class CameraFrameAnalyzer(
             val outW = if (rotation == 90 || rotation == 270) rawH else rawW
             val outH = if (rotation == 90 || rotation == 270) rawW else rawH
 
+            // Center-crop (post-rotation) to the live screen's aspect ratio.
+            val wantHOverW = targetAspect().coerceIn(0.1f, 10f)
+            var cropX0 = 0
+            var cropY0 = 0
+            var cropW = outW
+            var cropH = outH
+            val curHOverW = outH.toFloat() / outW
+            if (wantHOverW > curHOverW) {
+                // Screen is relatively taller than the sensor frame: keep full
+                // height, crop the sides.
+                cropW = max(1, (outH / wantHOverW).toInt())
+                cropX0 = (outW - cropW) / 2
+            } else if (wantHOverW < curHOverW) {
+                // Screen is relatively wider than the sensor frame: keep full
+                // width, crop top/bottom.
+                cropH = max(1, (outW * wantHOverW).toInt())
+                cropY0 = (outH - cropH) / 2
+            }
+
             var yIdx: Int
             var uvRow: Int
             var uvCol: Int
@@ -83,13 +112,13 @@ class CameraFrameAnalyzer(
             // Iterate every source pixel is too slow at full camera resolution;
             // stride-sample instead, aiming for roughly one sample per output cell
             // times a small supersampling factor for reasonable box-average quality.
-            val sampleStepX = max(1, outW / (c * 3))
-            val sampleStepY = max(1, outH / (rws * 3))
+            val sampleStepX = max(1, cropW / (c * 3))
+            val sampleStepY = max(1, cropH / (rws * 3))
 
-            var py = 0
-            while (py < outH) {
-                var px = 0
-                while (px < outW) {
+            var py = cropY0
+            while (py < cropY0 + cropH) {
+                var px = cropX0
+                while (px < cropX0 + cropW) {
                     // Map output (post-rotation) pixel -> raw sensor pixel.
                     val rawX: Int
                     val rawY: Int
@@ -114,8 +143,8 @@ class CameraFrameAnalyzer(
                             val g = 1.164f * yF - 0.392f * uVal - 0.813f * vVal
                             val b = 1.164f * yF + 2.017f * uVal
 
-                            var cellX = (px * c) / outW
-                            val cellY = (py * rws) / outH
+                            var cellX = ((px - cropX0) * c) / cropW
+                            val cellY = ((py - cropY0) * rws) / cropH
                             if (doMirror) cellX = c - 1 - cellX
                             cellX = cellX.coerceIn(0, c - 1)
                             val cellYc = cellY.coerceIn(0, rws - 1)
@@ -142,7 +171,7 @@ class CameraFrameAnalyzer(
                 }
             }
 
-            onFrame(outR, outG, outB, c, rws, outW, outH)
+            onFrame(outR, outG, outB, c, rws, cropW, cropH)
         }
     }
 }

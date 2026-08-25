@@ -142,7 +142,10 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 frame = frame,
                 geometry = geometry,
                 font = settings.font,
-                backgroundColor = Color.Black,
+                // Invert ASCII flips which brightness maps to which glyph density
+                // (handled in the pipeline), and pairs that with a white instead of
+                // black background — glyph color itself is unaffected either way.
+                backgroundColor = if (settings.invert) Color.White else Color.Black,
                 modifier = Modifier
                     .fillMaxSize()
                     .onSizeChanged { viewModel.reportViewportSize(it.width, it.height) },

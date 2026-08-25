@@ -343,17 +343,21 @@ object AsciiPipeline {
         }
 
         // ---------- step 9 groundwork: per-cell color (before merge averaging) ----------
+        // Colors always use the true (non-inverted) luminance/RGB — Invert ASCII
+        // only flips which glyph density represents a given brightness, not what
+        // color that glyph is drawn in (the glyph should still read as "the
+        // color of the input").
         val edgeColor = settings.edgeColorArgb
         for (i in 0 until n) {
             result.colors[i] = if (settings.edgeColorEnabled && isEdge[i]) {
                 edgeColor
             } else {
-                cellColor(settings, distR[i], distG[i], distB[i], v[i])
+                cellColor(settings, distR[i], distG[i], distB[i], distLum[i])
             }
         }
 
         // ---------- step 8: block merge (3x3 first, then 2x2) ----------
-        applyBlockMerge(result, distR, distG, distB, v, isEdge, edgeColor, cols, rows, settings, state)
+        applyBlockMerge(result, distR, distG, distB, distLum, isEdge, edgeColor, cols, rows, settings, state)
 
         return result
     }
