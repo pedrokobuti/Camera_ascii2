@@ -42,6 +42,7 @@ import com.llama.asciicam.pipeline.AsciiSettings
 import com.llama.asciicam.pipeline.ColorMode
 import com.llama.asciicam.pipeline.CharSource
 import com.llama.asciicam.pipeline.DistortionType
+import com.llama.asciicam.pipeline.EdgeColorMode
 import com.llama.asciicam.pipeline.FontChoice
 import com.llama.asciicam.pipeline.MediaSource
 import com.llama.asciicam.pipeline.NoiseType
@@ -174,8 +175,15 @@ fun SettingsPanel(
         if (settings.edgeDetectEnabled) {
             item { LabeledSlider("Edge threshold", settings.edgeThreshold.toFloat(), 0f, 100f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(edgeThreshold = v.toInt()) } } }
             item { LabeledSlider("Edge strength", settings.edgeStrength.toFloat(), 0f, 200f, valueLabel = { it.toInt().toString() }) { v -> set { it.copy(edgeStrength = v.toInt()) } } }
-            item { RowSwitch("Solid edge color", settings.edgeColorEnabled) { v -> set { it.copy(edgeColorEnabled = v) } } }
-            if (settings.edgeColorEnabled) {
+            item { SectionLabel("Outline color") }
+            item {
+                ChoiceRow(
+                    options = listOf("Off" to EdgeColorMode.OFF, "Custom" to EdgeColorMode.CUSTOM, "1mposter colors" to EdgeColorMode.IMPOSTER),
+                    selected = settings.edgeColorMode,
+                    onSelect = { v -> set { it.copy(edgeColorMode = v) } },
+                )
+            }
+            if (settings.edgeColorMode == EdgeColorMode.CUSTOM) {
                 item {
                     ColorPickerRow(argb = settings.edgeColorArgb) { c -> set { it.copy(edgeColorArgb = c) } }
                 }
@@ -208,7 +216,7 @@ fun SettingsPanel(
         item { SectionLabel("Color mode") }
         item {
             ChoiceRow(
-                options = listOf("Source" to ColorMode.SOURCE, "Palette" to ColorMode.PALETTE, "Mono" to ColorMode.MONO),
+                options = listOf("Source" to ColorMode.SOURCE, "Palette" to ColorMode.PALETTE, "1mposter colors" to ColorMode.IMPOSTER, "Mono" to ColorMode.MONO),
                 selected = settings.colorMode,
                 onSelect = { v -> set { it.copy(colorMode = v) } },
             )

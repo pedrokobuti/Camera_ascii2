@@ -347,17 +347,17 @@ object AsciiPipeline {
         // only flips which glyph density represents a given brightness, not what
         // color that glyph is drawn in (the glyph should still read as "the
         // color of the input").
-        val edgeColor = settings.edgeColorArgb
+        val edgeColorActive = settings.edgeColorMode != EdgeColorMode.OFF
         for (i in 0 until n) {
-            result.colors[i] = if (settings.edgeColorEnabled && isEdge[i]) {
-                edgeColor
+            result.colors[i] = if (edgeColorActive && isEdge[i]) {
+                edgeColorFor(settings, distLum[i])
             } else {
                 cellColor(settings, distR[i], distG[i], distB[i], distLum[i])
             }
         }
 
         // ---------- step 8: block merge (3x3 first, then 2x2) ----------
-        applyBlockMerge(result, distR, distG, distB, distLum, isEdge, edgeColor, cols, rows, settings, state)
+        applyBlockMerge(result, distR, distG, distB, distLum, isEdge, cols, rows, settings, state)
 
         return result
     }
@@ -475,7 +475,16 @@ object AsciiPipeline {
             ColorMode.SOURCE -> argb(255, r, g, b)
             ColorMode.MONO -> 0xFFE8E8EA.toInt()
             ColorMode.PALETTE -> paletteColor(settings.paletteStops, v)
+            ColorMode.IMPOSTER -> paletteColor(IMPOSTER_PALETTE_STOPS, v)
         }
+    }
+
+    /** Mirrors [IMPOSTER_PALETTE_STOPS] in reverse order, so an edge cell never
+     * lands on the same color as a non-edge cell at the same brightness. */
+    private fun edgeColorFor(settings: AsciiSettings, v: Float): Int = when (settings.edgeColorMode) {
+        EdgeColorMode.CUSTOM -> settings.edgeColorArgb
+        EdgeColorMode.IMPOSTER -> paletteColor(IMPOSTER_PALETTE_STOPS.asReversed(), v)
+        EdgeColorMode.OFF -> settings.edgeColorArgb // unused by callers; OFF is gated before this is called
     }
 
     private fun paletteColor(stops: List<PaletteStop>, v: Float): Int {
@@ -522,7 +531,6 @@ object AsciiPipeline {
         b: FloatArray,
         v: FloatArray,
         isEdge: BooleanArray,
-        edgeColor: Int,
         cols: Int,
         rows: Int,
         settings: AsciiSettings,
@@ -566,8 +574,8 @@ object AsciiPipeline {
                                 }
                             }
                             span[originIdx] = blockSize
-                            colors[originIdx] = if (settings.edgeColorEnabled && anyEdge) {
-                                edgeColor
+                            colors[originIdx] = if (settings.edgeColorMode != EdgeColorMode.OFF && anyEdge) {
+                                edgeColorFor(settings, v[originIdx])
                             } else {
                                 cellColor(settings, sumR / count, sumG / count, sumB / count, v[originIdx])
                             }

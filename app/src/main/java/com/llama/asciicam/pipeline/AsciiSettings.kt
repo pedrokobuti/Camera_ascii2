@@ -7,7 +7,10 @@ enum class DistortionType { NONE, SINE, CIRCULAR, NOISE, TWIRL, PINCH, GLITCH }
 enum class CharSource { RAMP, WORD }
 
 /** How each cell's glyph is colored. */
-enum class ColorMode { SOURCE, PALETTE, MONO }
+enum class ColorMode { SOURCE, PALETTE, IMPOSTER, MONO }
+
+/** How edge-detected cells are colored, separately from [ColorMode]. */
+enum class EdgeColorMode { OFF, CUSTOM, IMPOSTER }
 
 /** Where pixels for this frame come from. */
 enum class MediaSource { CAMERA, IMAGE, NOISE }
@@ -27,6 +30,21 @@ enum class FontChoice(val displayName: String) {
  * distributed across [0,1], matching the original tool's palette-stop editor.
  */
 data class PaletteStop(val hex: String)
+
+/**
+ * Fixed 5-color "Imposter colors" palette (black/magenta/green/cyan/white),
+ * selectable as [ColorMode.IMPOSTER] for the main glyph color and — mapped in
+ * reverse order, so it never matches the main color at the same brightness —
+ * as [EdgeColorMode.IMPOSTER] for edge-detected cells. Unlike [PaletteStop]
+ * lists under [ColorMode.PALETTE], this one isn't user-editable.
+ */
+val IMPOSTER_PALETTE_STOPS = listOf(
+    PaletteStop("#000000"),
+    PaletteStop("#FA008B"),
+    PaletteStop("#11E60D"),
+    PaletteStop("#0EE1F3"),
+    PaletteStop("#FFFFFF"),
+)
 
 /**
  * Central mutable-ish settings bag. Ranges/defaults mirror the original web
@@ -55,7 +73,7 @@ data class AsciiSettings(
     val edgeDetectEnabled: Boolean = true,
     val edgeThreshold: Int = 35, // 0..100
     val edgeStrength: Int = 100, // 0..200
-    val edgeColorEnabled: Boolean = false,
+    val edgeColorMode: EdgeColorMode = EdgeColorMode.OFF,
     val edgeColorArgb: Int = 0xFFFFFFFF.toInt(),
 
     // Distortion
