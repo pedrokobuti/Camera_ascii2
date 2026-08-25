@@ -26,6 +26,7 @@ object Export {
 
     /** Renders the frame into a standalone bitmap at [outWidth]x[outHeight] pixels. */
     fun renderToBitmap(
+        context: Context,
         frame: AsciiFrameResult,
         geometry: GridGeometry,
         font: FontChoice,
@@ -37,7 +38,7 @@ object Export {
         val canvas = Canvas(bmp)
         canvas.drawColor(backgroundArgb)
 
-        val typeface = GlyphMetrics.typefaceFor(font)
+        val typeface = GlyphMetrics.typefaceFor(context, font)
         val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.typeface = typeface

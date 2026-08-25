@@ -1,10 +1,13 @@
 package com.llama.asciicam.pipeline
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import androidx.core.content.res.ResourcesCompat
+import com.llama.asciicam.R
 
 /**
  * Android-graphics-backed glyph measurement: character aspect ratio, vertical
@@ -21,7 +24,12 @@ object GlyphMetrics {
     private const val PROBE_SIZE = 64f
     private const val DENSITY_BITMAP_SIZE = 32
 
-    fun typefaceFor(font: FontChoice): Typeface = when (font) {
+    // ResourcesCompat.getFont() does its own internal caching, but this avoids
+    // repeating the lookup (and its cache-key hashing) on every call.
+    private var cachedModernDos: Typeface? = null
+
+    fun typefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
+        FontChoice.MODERN_DOS -> cachedModernDos ?: (ResourcesCompat.getFont(context, R.font.modern_dos_8x8) ?: Typeface.MONOSPACE).also { cachedModernDos = it }
         FontChoice.MONOSPACE -> Typeface.MONOSPACE
         FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
     }

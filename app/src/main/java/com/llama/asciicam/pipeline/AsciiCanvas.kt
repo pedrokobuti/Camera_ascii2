@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalContext
 
 /**
  * Draws one [AsciiFrameResult] using `nativeCanvas.drawText` per visible
@@ -32,7 +33,8 @@ fun AsciiCanvas(
     backgroundColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    val typeface = remember(font) { GlyphMetrics.typefaceFor(font) }
+    val context = LocalContext.current
+    val typeface = remember(font) { GlyphMetrics.typefaceFor(context, font) }
     val baselineRatio = remember(font) { GlyphMetrics.measureBaselineOffsetRatio(typeface) }
     val paint = remember(typeface) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {

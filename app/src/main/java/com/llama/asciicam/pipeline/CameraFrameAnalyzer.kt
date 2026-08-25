@@ -1,5 +1,6 @@
 package com.llama.asciicam.pipeline
 
+import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import kotlin.math.max
@@ -31,6 +32,20 @@ class CameraFrameAnalyzer(
 
     override fun analyze(image: ImageProxy) {
         try {
+            analyzeInternal(image)
+        } catch (e: Exception) {
+            // A single bad frame (unexpected plane layout, race with camera
+            // teardown, etc.) must never crash the app — this runs on a
+            // background executor with no default uncaught-exception handler,
+            // so any exception escaping here takes the whole process down.
+            Log.e("CameraFrameAnalyzer", "Dropping one frame after analyze() failure", e)
+        } finally {
+            image.close()
+        }
+    }
+
+    private fun analyzeInternal(image: ImageProxy) {
+        run {
             val c = max(1, cols())
             val rws = max(1, rows())
             val n = c * rws
@@ -128,8 +143,6 @@ class CameraFrameAnalyzer(
             }
 
             onFrame(outR, outG, outB, c, rws, outW, outH)
-        } finally {
-            image.close()
         }
     }
 }

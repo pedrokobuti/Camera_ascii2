@@ -1,15 +1,21 @@
 package com.llama.asciicam.ui
 
-import android.content.Context
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
 import com.llama.asciicam.pipeline.CameraFrameAnalyzer
-import java.util.concurrent.ExecutorService
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.Executors
 
 /**
@@ -17,6 +23,19 @@ import java.util.concurrent.Executors
  * *is* the viewfinder) whenever [active] is true, and unbinds it otherwise
  * (e.g. while the image or noise source is selected, or permission is
  * missing). Rebinds automatically when [useFrontCamera] toggles.
+ *
+ * The camera provider is fetched exactly once (via [LaunchedEffect]) and the
+ * analyzer executor is created exactly once for this composable's lifetime
+ * (via [remember]) and shut down only when it finally leaves composition.
+ * An earlier version recreated both the executor *and* the provider fetch on
+ * every single active/useFrontCamera change, inside a DisposableEffect keyed
+ * on those same values — tearing down and shutting down the executor
+ * immediately on each toggle raced against that toggle's own in-flight
+ * (asynchronous) provider-fetch listener from a moment earlier: if a stale
+ * listener fired after its executor had already been shut down, CameraX
+ * would try to dispatch a camera frame to a dead executor
+ * (RejectedExecutionException, uncaught on a CameraX-internal thread —
+ * exactly the kind of crash reported when tapping the flip-camera button).
  */
 @Composable
 fun CameraHost(
@@ -27,44 +46,57 @@ fun CameraHost(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    DisposableEffect(active, useFrontCamera) {
-        var executor: ExecutorService? = null
-        var providerRef: ProcessCameraProvider? = null
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    DisposableEffect(Unit) {
+        onDispose { executor.shutdown() }
+    }
 
-        if (active) {
-            executor = Executors.newSingleThreadExecutor()
-            val providerFuture = ProcessCameraProvider.getInstance(context)
-            providerFuture.addListener({
-                val provider = providerFuture.get()
-                providerRef = provider
-                val analysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                analysis.setAnalyzer(
-                    executor!!,
-                    CameraFrameAnalyzer(
-                        cols = { viewModel.currentGridCols() },
-                        rows = { viewModel.currentGridRows() },
-                        mirror = { useFrontCamera },
-                    ) { r, g, b, cols, rows, srcW, srcH ->
-                        viewModel.onCameraFrame(r, g, b, cols, rows, srcW, srcH)
-                    },
+    var provider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+    LaunchedEffect(Unit) {
+        provider = try {
+            suspendCancellableCoroutine { cont ->
+                val future = ProcessCameraProvider.getInstance(context)
+                future.addListener(
+                    { cont.resumeWith(runCatching { future.get() }) },
+                    ContextCompat.getMainExecutor(context),
                 )
-                val selector = if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
-                try {
-                    provider.unbindAll()
-                    provider.bindToLifecycle(lifecycleOwner, selector, analysis)
-                } catch (_: Exception) {
-                    // Camera unavailable (e.g. emulator without a camera, or in-use elsewhere).
-                }
-            }, contextExecutorOf(context))
+            }
+        } catch (e: Exception) {
+            Log.e("CameraHost", "Failed to obtain ProcessCameraProvider", e)
+            null
+        }
+    }
+
+    DisposableEffect(active, useFrontCamera, provider) {
+        val p = provider
+        if (active && p != null) {
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            analysis.setAnalyzer(
+                executor,
+                CameraFrameAnalyzer(
+                    cols = { viewModel.currentGridCols() },
+                    rows = { viewModel.currentGridRows() },
+                    mirror = { useFrontCamera },
+                ) { r, g, b, cols, rows, srcW, srcH ->
+                    viewModel.onCameraFrame(r, g, b, cols, rows, srcW, srcH)
+                },
+            )
+            val selector = if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
+            try {
+                p.unbindAll()
+                p.bindToLifecycle(lifecycleOwner, selector, analysis)
+            } catch (e: Exception) {
+                // Camera unavailable (e.g. no front camera on this device/emulator, or in-use elsewhere).
+                Log.e("CameraHost", "Failed to bind camera (front=$useFrontCamera)", e)
+            }
+        } else {
+            p?.unbindAll()
         }
 
         onDispose {
-            providerRef?.unbindAll()
-            executor?.shutdown()
+            p?.unbindAll()
         }
     }
 }
-
-private fun contextExecutorOf(context: Context) = androidx.core.content.ContextCompat.getMainExecutor(context)

@@ -16,6 +16,7 @@ enum class MediaSource { CAMERA, IMAGE, NOISE }
 enum class NoiseType { WHITE, PERLIN, SIMPLEX, SPARSE, ALLIGATOR, CELLULAR, PLASMA, TURBULENCE }
 
 enum class FontChoice(val displayName: String) {
+    MODERN_DOS("Modern DOS 8x8"),
     MONOSPACE("Monospace"),
     SERIF_MONO("Serif Monospace"),
 }
@@ -40,7 +41,7 @@ data class AsciiSettings(
     val cols: Int = 110, // range 20..300
     val lineSpacingPercent: Int = 50, // range 20..150
     val charSpacingPercent: Int = 100, // range 50..300
-    val font: FontChoice = FontChoice.MONOSPACE,
+    val font: FontChoice = FontChoice.MODERN_DOS,
 
     // Character source
     val charSource: CharSource = CharSource.RAMP,

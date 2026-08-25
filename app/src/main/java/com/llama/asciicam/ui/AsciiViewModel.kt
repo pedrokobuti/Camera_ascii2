@@ -56,7 +56,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     private var cachedRampKey: String? = null
     private var cachedSortedRamp: String = ""
     private var cachedAspectFont = settings.font
-    private var cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(settings.font))
+    private var cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(getApplication<Application>(), settings.font))
 
     private var noiseJob: Job? = null
     private var noiseClock = 0f
@@ -116,7 +116,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     private fun ensureRamp(): String {
         val key = settings.rampString + "|" + settings.font.name
         if (key != cachedRampKey) {
-            cachedSortedRamp = GlyphMetrics.buildDensitySortedRamp(settings.rampString, GlyphMetrics.typefaceFor(settings.font))
+            cachedSortedRamp = GlyphMetrics.buildDensitySortedRamp(settings.rampString, GlyphMetrics.typefaceFor(getApplication<Application>(), settings.font))
             cachedRampKey = key
         }
         return cachedSortedRamp
@@ -124,7 +124,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun ensureCharAspect(): Float {
         if (cachedAspectFont != settings.font) {
-            cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(settings.font))
+            cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(getApplication<Application>(), settings.font))
             cachedAspectFont = settings.font
         }
         return cachedCharAspect
@@ -230,7 +230,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         if (snapshot == null) { onDone(false); return }
         viewModelScope.launch(Dispatchers.Default) {
             val bmp = Export.renderToBitmap(
-                snapshot.frame, snapshot.geometry, settings.font, android.graphics.Color.BLACK, widthPx, heightPx,
+                context, snapshot.frame, snapshot.geometry, settings.font, android.graphics.Color.BLACK, widthPx, heightPx,
             )
             val ok = Export.savePng(context, bmp)
             bmp.recycle()
