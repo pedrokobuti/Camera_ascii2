@@ -265,19 +265,33 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         if (isRecording || videoRecorder != null) { onStarted(false); return }
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
-            // Match the live viewport's aspect ratio (capped so encoding stays fast),
-            // not a fixed 1080x1440 — that hardcoded shape rarely matches an actual
-            // phone screen (usually much taller), so the content was getting shrunk
-            // to fit with black bars on the sides, and the resulting much-smaller,
-            // heavily-compressed text read as "a different font" once encoded.
-            val maxDim = 1080
-            val vw = viewportW.coerceAtLeast(1)
-            val vh = viewportH.coerceAtLeast(1)
-            val fitScale = (maxDim.toFloat() / maxOf(vw, vh)).coerceAtMost(1f)
-            val targetW = (vw * fitScale).toInt().coerceAtLeast(2)
-            val targetH = (vh * fitScale).toInt().coerceAtLeast(2)
-            // TEMPORARY diagnostic logging — remove once the video-font bug is found.
-            android.util.Log.i("AsciiViewModel", "startRecording: settings.font=${settings.font} target=${targetW}x$targetH")
+            // Use the live geometry's actual native content size (cols*cellW x
+            // rows*rowPitch), not an independently-derived viewport estimate —
+            // matching it exactly means Export.drawFrameInto's internal fit
+            // scale stays ~1.0. A prior version capped a viewport-based guess
+            // to a 1080 max dimension, which for most phones came out smaller
+            // than the live content size (confirmed via logcat: target=498x1080
+            // against a ~1080px-wide live view) — so every frame was rendered
+            // at its normal (larger) font size and then shrunk via
+            // canvas.scale(). "Modern DOS 8x8" is a pixel/bitmap-style font
+            // that only looks crisp at the sizes it was designed for; shrinking
+            // an already-hinted/rasterized glyph like that is exactly the kind
+            // of thing that can make it look like a completely different,
+            // smoother font once re-rasterized at the scaled-down size — which
+            // matches the screenshot (clean curved glyphs, not the blocky
+            // pixel-art look) far better than a codec/encoding explanation.
+            val snapshotGeometry = render?.geometry
+            val targetW: Int
+            val targetH: Int
+            if (snapshotGeometry != null) {
+                targetW = (snapshotGeometry.cols * snapshotGeometry.cellW).toInt().coerceAtLeast(2)
+                targetH = (snapshotGeometry.rows * snapshotGeometry.rowPitch).toInt().coerceAtLeast(2)
+            } else {
+                // No frame yet (recording tapped before the first frame arrived) —
+                // fall back to the raw viewport size, still native/unscaled.
+                targetW = viewportW.coerceAtLeast(2)
+                targetH = viewportH.coerceAtLeast(2)
+            }
             val recorder = VideoRecorder(
                 context = context,
                 font = settings.font,
