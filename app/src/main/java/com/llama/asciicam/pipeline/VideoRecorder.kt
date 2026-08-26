@@ -119,9 +119,22 @@ class VideoRecorder(
     fun start(): Boolean {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outWidth, outHeight).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
+            // Much higher than typical camera-video bitrate, and every frame a
+            // keyframe: ASCII-art text changes character-by-character between
+            // frames rather than "moving" the way real video content does, so
+            // inter-frame motion compensation finds poor matches for it — that
+            // forces heavy quantization of the leftover prediction error on
+            // every non-keyframe. With only 1 keyframe/sec at a modest 6Mbps,
+            // nearly every displayed frame was a heavily-compressed P-frame.
+            // Confirmed (via a pre-encode PNG dump) that the drawn bitmap itself
+            // is correct and (via a full rewrite to OpenGL submission) that how
+            // frames reach the encoder isn't the issue either — encoding itself
+            // is the one remaining constant across every failure, and text
+            // content is exactly the case general-purpose video compression
+            // handles worst.
+            setInteger(MediaFormat.KEY_BIT_RATE, 20_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0)
         }
         val enc = try {
             MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
