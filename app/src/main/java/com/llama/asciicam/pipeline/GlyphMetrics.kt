@@ -6,7 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
-import androidx.core.content.res.ResourcesCompat
+import android.util.Log
 import com.llama.asciicam.R
 
 /**
@@ -24,14 +24,31 @@ object GlyphMetrics {
     private const val PROBE_SIZE = 64f
     private const val DENSITY_BITMAP_SIZE = 32
 
-    // ResourcesCompat.getFont() does its own internal caching, but this avoids
-    // repeating the lookup (and its cache-key hashing) on every call.
-    private var cachedModernDos: Typeface? = null
+    // Cached only on success — a transient load failure must NOT get stuck
+    // here, since that would silently poison every future caller (including
+    // ones on a different thread, like VideoRecorder's) into the fallback
+    // font forever for the rest of the process. @Volatile so a load that
+    // completes on one thread is visible to callers on another right away.
+    @Volatile private var cachedModernDos: Typeface? = null
 
     fun typefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
-        FontChoice.MODERN_DOS -> cachedModernDos ?: (ResourcesCompat.getFont(context, R.font.modern_dos_8x8) ?: Typeface.MONOSPACE).also { cachedModernDos = it }
+        FontChoice.MODERN_DOS -> cachedModernDos ?: loadModernDos(context).also { cachedModernDos = it } ?: Typeface.MONOSPACE
         FontChoice.MONOSPACE -> Typeface.MONOSPACE
         FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    }
+
+    // Resources.getFont() is the plain platform API (available since API 26,
+    // this app's minSdk) for loading a font resource — used directly instead
+    // of AndroidX's ResourcesCompat.getFont(), which layers on a
+    // compatibility shim (with its own async-callback machinery and internal
+    // cache) that this minSdk doesn't need and that has had known edge cases
+    // returning null/a substitute font on some devices when called off the
+    // main thread.
+    private fun loadModernDos(context: Context): Typeface? = try {
+        context.resources.getFont(R.font.modern_dos_8x8)
+    } catch (e: Exception) {
+        Log.e("GlyphMetrics", "Failed to load modern_dos_8x8 font", e)
+        null
     }
 
     /** width/height ratio of a representative glyph, used to derive cell width from font size. */
