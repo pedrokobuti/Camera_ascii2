@@ -332,8 +332,8 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             // every older one, so a full-resolution number here means a stale
             // APK. The font flag reports whether the Modern DOS typeface
             // actually loaded or silently fell back to MONOSPACE.
-            val diagnostic = "$RECORDING_BUILD_MARKER · ${recorder.outWidth}x${recorder.outHeight} · " +
-                if (usingFallbackFont) "FONT=FALLBACK" else "font ok"
+            val diagnostic = "$RECORDING_BUILD_MARKER · ${recorder.outWidth}x${recorder.outHeight} " +
+                "(${recorder.sizeNote}) · " + if (usingFallbackFont) "FONT=FALLBACK" else "font ok"
             android.util.Log.i("AsciiViewModel", "startRecording: ok=$ok $diagnostic")
             withContext(Dispatchers.Main) {
                 if (ok) {
@@ -375,6 +375,6 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
          * "nothing changed at all" are indistinguishable from a stale APK
          * otherwise, and that ambiguity has cost more than the fixes have.
          */
-        const val RECORDING_BUILD_MARKER = "build-9"
+        const val RECORDING_BUILD_MARKER = "build-10"
     }
 }

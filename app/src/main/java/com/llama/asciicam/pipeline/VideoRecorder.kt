@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
@@ -84,53 +85,51 @@ class VideoRecorder(
     requestedHeight: Int,
     private val provideFrame: () -> Pair<AsciiFrameResult, GridGeometry>?,
 ) {
-    // Lowered from 24: at the previous (much higher) resolution/bitrate/
-    // all-intra combination, the hardware encoder couldn't keep up in real
-    // time, and the choppy framerate + washed-out colors reported afterward
-    // both point at exactly that kind of overload.
-    private val fps = 15
+    // Back to 24 from a brief 15: the drop was meant to buy the encoder
+    // headroom for an overload that turned out to be a resolution problem
+    // (below), and it visibly cost framerate for nothing.
+    private val fps = 24
 
-    // Text is rasterized at this — the *native* content size, matching
-    // GridGeometry exactly (the caller passes requestedWidth/Height straight
-    // from geometry, uncapped — see AsciiViewModel.startRecording), same as
-    // the live view and PNG export. That matters: drawing into a canvas at
-    // anything other than geometry's native size falls back to
-    // Export.drawFrameInto's canvas.scale() fit-to-size path, which
-    // re-rasterizes every glyph at a mismatched size — for a hinted
-    // pixel-art font like "Modern DOS 8x8", that trades its blocky look for
-    // smoothed/anti-aliased edges, i.e. exactly what reads as "a completely
-    // different font" rather than as a resolution change. A previous fix
-    // already hit this once (see the AsciiViewModel comment) switching PNG
-    // export to native sizing; capping resolution for recording (below)
-    // must not reintroduce it, so this stays uncapped.
+    // The encoder's frame size, chosen by asking the device's actual H.264
+    // encoder what it supports (see [chooseEncoderSize]) rather than by
+    // picking a number.
+    //
+    // Both previous approaches were wrong in opposite directions, and the
+    // recorded file's dimensions proved it:
+    //
+    //  - A hard 720px cap produced a 336x720 file. Spread ~100 ASCII columns
+    //    across 336px and each character cell is ~3px wide. "Modern DOS 8x8"
+    //    is a pixel font that only reads as blocky at its native size;
+    //    squeezed into 3px cells and then upscaled back to fullscreen by the
+    //    player, its glyphs turn into smooth rounded blobs — which is exactly
+    //    the "clearly different font" that's been reported all along. The
+    //    same minification averages thin bright glyphs into the black
+    //    background, which is the "desaturated colors" report. Neither was a
+    //    codec bug; both were this cap.
+    //
+    //  - Uncapped native size (1080x2280 on a tall phone) is ~9,700
+    //    macroblocks, over H.264 Level 4.0's 8,192 limit. Configuring an
+    //    encoder past its supported level is undefined territory — silent
+    //    quality collapse or dropped frames, no exception thrown.
+    //
+    // So: prefer the exact native size (no resampling at all, the only way a
+    // pixel font survives intact), and shrink only as far as the encoder's
+    // reported VideoCapabilities actually require.
     private val nativeWidth = requestedWidth.coerceAtLeast(2)
     private val nativeHeight = requestedHeight.coerceAtLeast(2)
 
-    // What's actually handed to the encoder: nativeWidth/Height above,
-    // proportionally capped (same scale factor on both axes, so this only
-    // ever shrinks the frame, never distorts it) and then rounded to a
-    // multiple of 16 — H.264 hardware encoders operate on 16x16
-    // macroblocks, and a Surface-input size that isn't a multiple of 16 on
-    // both axes is a well-known source of on-device distortion (padding/
-    // scaling to the macroblock grid handled inconsistently across
-    // vendors). The cap itself exists because real-time hardware H.264
-    // encoding gets substantially more expensive per pixel, and an uncapped
-    // native content size (1080x2280+ on a typical tall phone) was too much
-    // for the encoder to sustain in real time — the likely cause of the
-    // choppy framerate and washed-out colors reported after a previous
-    // attempt raised bitrate/keyframe-frequency instead of addressing
-    // resolution. drawFrameToSurfaceGl below uploads the native-size bitmap
-    // as a GL texture and draws it into this smaller surface, so the GPU's
-    // ordinary bilinear minification does the downsizing — a uniform
-    // "recorded at lower resolution" softening of the whole finished frame,
-    // not a per-glyph rasterization change.
     // Public so the caller can surface them (see AsciiViewModel's recording
-    // diagnostics) — the recorded file's actual pixel dimensions are the
-    // simplest external proof of which build is running, since a stale APK
-    // records at the uncapped native size instead.
-    private val encoderCapScale = (MAX_ENCODER_DIM.toFloat() / maxOf(nativeWidth, nativeHeight)).coerceAtMost(1f)
-    val outWidth = align16((nativeWidth * encoderCapScale).toInt().coerceAtLeast(2))
-    val outHeight = align16((nativeHeight * encoderCapScale).toInt().coerceAtLeast(2))
+    // diagnostics) — the recorded file's real pixel dimensions have already
+    // proved to be the fastest way to tell what the recorder actually did.
+    private val chosenSize = chooseEncoderSize(nativeWidth, nativeHeight)
+    val outWidth = chosenSize.width
+    val outHeight = chosenSize.height
+
+    /** Short human-readable note on how [outWidth]x[outHeight] was arrived at
+     * ("native" when no resampling happens at all). Surfaced in the recording
+     * toast — whether the frame is being scaled is the single most diagnostic
+     * fact about how the output will look. */
+    val sizeNote: String get() = chosenSize.note
 
     // typeface is a constructor param now — loaded by the caller, on the
     // caller's (main) thread; see the class doc comment for why.
@@ -200,14 +199,13 @@ class VideoRecorder(
             // average. CBR forces it to actually spend close to the full
             // target every frame.
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-            // outWidth/outHeight are now capped (see above) and fps lowered
-            // too, so this no longer needs to be as high as the previous
-            // (20Mbps, uncapped-resolution) attempt to look good — and lower
-            // is also lighter for the encoder to sustain in real time, on
-            // top of the extra headroom from dropping all-intra above.
-            setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
+            // Scaled to the frame size actually chosen above and clamped to
+            // what this encoder reports it accepts, rather than a fixed number
+            // picked for one assumed resolution.
+            setInteger(MediaFormat.KEY_BIT_RATE, chooseBitRate(outWidth, outHeight, fps))
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
         }
+        Log.i(TAG, "encoder format: ${outWidth}x$outHeight (${chosenSize.note}) from native ${nativeWidth}x$nativeHeight @${fps}fps")
         val enc = try {
             MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
                 configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -543,12 +541,98 @@ class VideoRecorder(
     companion object {
         private const val TAG = "VideoRecorder"
 
-        // Cap on the encoder's target long edge — see the outWidth/outHeight
-        // doc comment above for why this is applied downstream of (native-
-        // resolution) text rasterization rather than fed into it.
-        private const val MAX_ENCODER_DIM = 720
+        /** An encoder-accepted frame size, plus the caps it was derived from. */
+        data class EncoderSize(val width: Int, val height: Int, val note: String)
 
-        private fun align16(v: Int): Int = ((v + 15) / 16) * 16
+        /**
+         * Largest encoder-supported frame size no bigger than
+         * [nativeW]x[nativeH], keeping the aspect ratio.
+         *
+         * Asking [MediaCodecInfo.VideoCapabilities] beats hardcoding a limit:
+         * the actual constraint is per-device (supported width/height ranges,
+         * required alignment, and the total-macroblock ceiling implied by the
+         * encoder's H.264 level), and phone ASCII frames are an unusually tall
+         * aspect ratio that generic "cap the long edge at N" rules handle
+         * badly — that's how this ended up at 336x720, far below what the
+         * encoder could actually have taken.
+         *
+         * Native size is tried first and used whenever it's supported, since
+         * any resampling at all visibly degrades a pixel font.
+         */
+        private fun chooseEncoderSize(nativeW: Int, nativeH: Int): EncoderSize {
+            val caps = findAvcEncoderCaps()
+                ?: return EncoderSize(align(nativeW, 16), align(nativeH, 16), "no caps")
+
+            val wAlign = caps.widthAlignment.coerceAtLeast(2)
+            val hAlign = caps.heightAlignment.coerceAtLeast(2)
+
+            // Walk down from 1.0; the first supported size wins. The step is
+            // small so a device that only needs a slight reduction gets one.
+            var scale = 1.0f
+            while (scale > 0.2f) {
+                val w = align((nativeW * scale).toInt(), wAlign).coerceAtLeast(wAlign)
+                val h = align((nativeH * scale).toInt(), hAlign).coerceAtLeast(hAlign)
+                val supported = try {
+                    caps.isSizeSupported(w, h)
+                } catch (e: Exception) {
+                    false
+                }
+                if (supported) {
+                    val note = if (scale >= 0.999f) "native" else "scaled ${"%.2f".format(scale)}"
+                    return EncoderSize(w, h, note)
+                }
+                scale -= 0.05f
+            }
+            // Nothing matched (very unusual) — fall back to the encoder's own
+            // reported upper bound rather than something invented.
+            val w = align(caps.supportedWidths.upper.coerceAtMost(nativeW), wAlign)
+            val h = align(
+                caps.getSupportedHeightsFor(w).upper.coerceAtMost(nativeH),
+                hAlign,
+            )
+            return EncoderSize(w.coerceAtLeast(wAlign), h.coerceAtLeast(hAlign), "caps upper")
+        }
+
+        /** Bitrate the encoder will actually accept, targeting [bitsPerPixel]. */
+        private fun chooseBitRate(width: Int, height: Int, fps: Int): Int {
+            // ~0.2 bits/pixel. Text on flat backgrounds is cheap for H.264 in
+            // the large empty regions but expensive on the sharp glyph edges
+            // that matter most here, so this sits above typical camera-video
+            // rates without being the 20Mbps that previously overloaded things.
+            val target = (width.toLong() * height * fps * 0.2).toLong()
+                .coerceIn(2_000_000L, 24_000_000L)
+                .toInt()
+            val caps = findAvcEncoderCaps() ?: return target
+            return try {
+                caps.bitrateRange.clamp(target)
+            } catch (e: Exception) {
+                target
+            }
+        }
+
+        private fun findAvcEncoderCaps(): MediaCodecInfo.VideoCapabilities? {
+            return try {
+                MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                    .asSequence()
+                    .filter { it.isEncoder }
+                    .filter { info ->
+                        info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }
+                    }
+                    .mapNotNull { info ->
+                        try {
+                            info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).videoCapabilities
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    .firstOrNull()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to query encoder capabilities", e)
+                null
+            }
+        }
+
+        private fun align(v: Int, to: Int): Int = ((v + to - 1) / to) * to
 
         // Not defined in EGL14 itself; required in the config attribs so the
         // chosen config is guaranteed compatible with MediaCodec's input surface.
