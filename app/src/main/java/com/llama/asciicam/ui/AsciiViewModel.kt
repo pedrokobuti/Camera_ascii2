@@ -276,6 +276,8 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             val fitScale = (maxDim.toFloat() / maxOf(vw, vh)).coerceAtMost(1f)
             val targetW = (vw * fitScale).toInt().coerceAtLeast(2)
             val targetH = (vh * fitScale).toInt().coerceAtLeast(2)
+            // TEMPORARY diagnostic logging — remove once the video-font bug is found.
+            android.util.Log.i("AsciiViewModel", "startRecording: settings.font=${settings.font} target=${targetW}x$targetH")
             val recorder = VideoRecorder(
                 context = context,
                 font = settings.font,

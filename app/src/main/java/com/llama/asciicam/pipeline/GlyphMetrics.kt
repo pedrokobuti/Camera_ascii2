@@ -31,10 +31,19 @@ object GlyphMetrics {
     // completes on one thread is visible to callers on another right away.
     @Volatile private var cachedModernDos: Typeface? = null
 
-    fun typefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
-        FontChoice.MODERN_DOS -> cachedModernDos ?: loadModernDos(context).also { cachedModernDos = it } ?: Typeface.MONOSPACE
-        FontChoice.MONOSPACE -> Typeface.MONOSPACE
-        FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    fun typefaceFor(context: Context, font: FontChoice): Typeface {
+        val result = when (font) {
+            FontChoice.MODERN_DOS -> cachedModernDos ?: loadModernDos(context).also { cachedModernDos = it } ?: Typeface.MONOSPACE
+            FontChoice.MONOSPACE -> Typeface.MONOSPACE
+            FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+        }
+        // TEMPORARY diagnostic logging — remove once the video-font bug is found.
+        Log.i(
+            "GlyphMetrics",
+            "typefaceFor(font=$font) thread=${Thread.currentThread().name} -> " +
+                "isMonospaceFallback=${result === Typeface.MONOSPACE} identity=${System.identityHashCode(result)}",
+        )
+        return result
     }
 
     // Resources.getFont() is the plain platform API (available since API 26,
