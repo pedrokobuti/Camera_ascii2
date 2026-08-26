@@ -138,9 +138,32 @@ class VideoRecorder(
     // typeface is a constructor param — the caller passes in the same shared
     // instance the live view draws with; see the class doc comment.
     private val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.typeface = typeface
-        textAlign = Paint.Align.CENTER
+
+    // Built with `also { p -> ... }`, deliberately NOT `apply { ... }`.
+    //
+    // This was the whole bug, and it silently defeated nine attempted fixes.
+    // As `Paint(...).apply { this.typeface = typeface }`, the bare `typeface`
+    // on the right-hand side does not resolve to this class's constructor
+    // property at all: inside `apply`, the implicit receiver is the Paint, and
+    // an implicit receiver's members shadow the enclosing *class's* properties.
+    // So it read Paint.getTypeface() — null on a fresh Paint — and assigned it
+    // straight back. Every glyph was then drawn with Android's default
+    // typeface, which is why recordings came out in a completely different
+    // font no matter which Typeface was passed in, which thread loaded it, or
+    // how it reached the encoder.
+    //
+    // The same `apply { this.typeface = typeface }` spelling appears in
+    // GlyphMetrics, AsciiCanvas and Export and is correct there, because in
+    // those the name refers to a local variable or function parameter — those
+    // DO take precedence over an implicit receiver's members. Only here was it
+    // a class property, and only recordings were ever wrong.
+    //
+    // `also` gives the lambda a named parameter and no implicit receiver, so
+    // `typeface` unambiguously means this class's property and the shadowing
+    // cannot come back.
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).also { p ->
+        p.typeface = typeface
+        p.textAlign = Paint.Align.CENTER
     }
 
     /**

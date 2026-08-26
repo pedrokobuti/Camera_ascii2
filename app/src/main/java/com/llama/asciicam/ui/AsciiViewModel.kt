@@ -393,6 +393,6 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
          * "nothing changed at all" are indistinguishable from a stale APK
          * otherwise, and that ambiguity has cost more than the fixes have.
          */
-        const val RECORDING_BUILD_MARKER = "build-11"
+        const val RECORDING_BUILD_MARKER = "build-12"
     }
 }
