@@ -160,6 +160,15 @@ class VideoRecorder(
         thread = null
     }
 
+    // TEMPORARY diagnostic — remove once the video-font bug is found. Saves
+    // the exact bitmap about to be handed to the video encoder as a PNG, the
+    // very first time a frame is drawn each recording — bypassing
+    // MediaCodec/the muxer/video playback entirely, so we can tell whether
+    // the wrong font is already present in the bitmap itself (a drawing bug)
+    // or only appears after the encoder/surface/playback pipeline touches it
+    // (an encoding bug).
+    @Volatile private var debugDumped = false
+
     private fun runLoop() {
         val enc = codec ?: return
         val surface = inputSurface ?: return
@@ -175,6 +184,15 @@ class VideoRecorder(
                 if (current != null) {
                     val (frame, geometry) = current
                     Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
+                    if (!debugDumped) {
+                        debugDumped = true
+                        try {
+                            Export.savePng(context, frameBitmap)
+                            Log.i(TAG, "DEBUG: dumped pre-encode frame to Pictures/AsciiCam")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "DEBUG: failed to dump pre-encode frame", e)
+                        }
+                    }
                     val surfaceCanvas = surface.lockCanvas(null)
                     try {
                         surfaceCanvas.drawBitmap(frameBitmap, 0f, 0f, null)
