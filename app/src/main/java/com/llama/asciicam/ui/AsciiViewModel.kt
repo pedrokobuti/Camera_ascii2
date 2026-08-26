@@ -286,6 +286,11 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             // smoother font once re-rasterized at the scaled-down size — which
             // matches the screenshot (clean curved glyphs, not the blocky
             // pixel-art look) far better than a codec/encoding explanation.
+            // VideoRecorder still caps what it hands the *encoder* to keep
+            // real-time H.264 encoding sustainable, but it does that itself
+            // downstream of drawing (GPU-downsampling the finished, natively-
+            // rendered frame — see its nativeWidth/outWidth split) instead of
+            // here, so glyph rasterization itself never sees a size mismatch.
             val snapshotGeometry = render?.geometry
             val targetW: Int
             val targetH: Int

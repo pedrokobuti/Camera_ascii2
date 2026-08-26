@@ -69,14 +69,49 @@ class VideoRecorder(
     requestedHeight: Int,
     private val provideFrame: () -> Pair<AsciiFrameResult, GridGeometry>?,
 ) {
-    private val fps = 24
+    // Lowered from 24: at the previous (much higher) resolution/bitrate/
+    // all-intra combination, the hardware encoder couldn't keep up in real
+    // time, and the choppy framerate + washed-out colors reported afterward
+    // both point at exactly that kind of overload.
+    private val fps = 15
 
-    // H.264 hardware encoders operate on 16x16 macroblocks; a Surface-input
-    // size that isn't a multiple of 16 on both axes is a well-known source of
-    // on-device distortion (padding/scaling to the macroblock grid handled
-    // inconsistently across vendors).
-    private val outWidth = align16(requestedWidth)
-    private val outHeight = align16(requestedHeight)
+    // Text is rasterized at this — the *native* content size, matching
+    // GridGeometry exactly (the caller passes requestedWidth/Height straight
+    // from geometry, uncapped — see AsciiViewModel.startRecording), same as
+    // the live view and PNG export. That matters: drawing into a canvas at
+    // anything other than geometry's native size falls back to
+    // Export.drawFrameInto's canvas.scale() fit-to-size path, which
+    // re-rasterizes every glyph at a mismatched size — for a hinted
+    // pixel-art font like "Modern DOS 8x8", that trades its blocky look for
+    // smoothed/anti-aliased edges, i.e. exactly what reads as "a completely
+    // different font" rather than as a resolution change. A previous fix
+    // already hit this once (see the AsciiViewModel comment) switching PNG
+    // export to native sizing; capping resolution for recording (below)
+    // must not reintroduce it, so this stays uncapped.
+    private val nativeWidth = requestedWidth.coerceAtLeast(2)
+    private val nativeHeight = requestedHeight.coerceAtLeast(2)
+
+    // What's actually handed to the encoder: nativeWidth/Height above,
+    // proportionally capped (same scale factor on both axes, so this only
+    // ever shrinks the frame, never distorts it) and then rounded to a
+    // multiple of 16 — H.264 hardware encoders operate on 16x16
+    // macroblocks, and a Surface-input size that isn't a multiple of 16 on
+    // both axes is a well-known source of on-device distortion (padding/
+    // scaling to the macroblock grid handled inconsistently across
+    // vendors). The cap itself exists because real-time hardware H.264
+    // encoding gets substantially more expensive per pixel, and an uncapped
+    // native content size (1080x2280+ on a typical tall phone) was too much
+    // for the encoder to sustain in real time — the likely cause of the
+    // choppy framerate and washed-out colors reported after a previous
+    // attempt raised bitrate/keyframe-frequency instead of addressing
+    // resolution. drawFrameToSurfaceGl below uploads the native-size bitmap
+    // as a GL texture and draws it into this smaller surface, so the GPU's
+    // ordinary bilinear minification does the downsizing — a uniform
+    // "recorded at lower resolution" softening of the whole finished frame,
+    // not a per-glyph rasterization change.
+    private val encoderCapScale = (MAX_ENCODER_DIM.toFloat() / maxOf(nativeWidth, nativeHeight)).coerceAtMost(1f)
+    private val outWidth = align16((nativeWidth * encoderCapScale).toInt().coerceAtLeast(2))
+    private val outHeight = align16((nativeHeight * encoderCapScale).toInt().coerceAtLeast(2))
 
     // Independent instance, not the shared cached one — see
     // GlyphMetrics.independentTypefaceFor's doc for why.
@@ -88,9 +123,10 @@ class VideoRecorder(
     }
 
     // Reused across frames — one frame's worth of scratch memory, not
-    // reallocated every ~40ms. Text is drawn into this (proven-correct)
-    // Bitmap canvas; only its finished pixels ever reach the encoder.
-    private val frameBitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
+    // reallocated every ~40ms. Text is drawn into this (proven-correct),
+    // native-sized Bitmap canvas; only its finished pixels ever reach the
+    // encoder, downsized on the GPU as described above.
+    private val frameBitmap = Bitmap.createBitmap(nativeWidth, nativeHeight, Bitmap.Config.ARGB_8888)
     private val frameBitmapCanvas = Canvas(frameBitmap)
 
     private var codec: MediaCodec? = null
@@ -119,22 +155,40 @@ class VideoRecorder(
     fun start(): Boolean {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, outWidth, outHeight).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            // Much higher than typical camera-video bitrate, and every frame a
-            // keyframe: ASCII-art text changes character-by-character between
-            // frames rather than "moving" the way real video content does, so
-            // inter-frame motion compensation finds poor matches for it — that
-            // forces heavy quantization of the leftover prediction error on
-            // every non-keyframe. With only 1 keyframe/sec at a modest 6Mbps,
-            // nearly every displayed frame was a heavily-compressed P-frame.
-            // Confirmed (via a pre-encode PNG dump) that the drawn bitmap itself
-            // is correct and (via a full rewrite to OpenGL submission) that how
-            // frames reach the encoder isn't the issue either — encoding itself
-            // is the one remaining constant across every failure, and text
-            // content is exactly the case general-purpose video compression
-            // handles worst.
-            setInteger(MediaFormat.KEY_BIT_RATE, 20_000_000)
+            // The previous attempt forced every frame to be a keyframe
+            // (I-frame-interval 0), on the theory that ASCII text changes
+            // character-by-character rather than "moving", so inter-frame
+            // motion search would find poor matches. True, but that misses
+            // that a normal P-frame encode doesn't depend on motion search
+            // helping — any macroblock that doesn't match well is simply
+            // intra-coded within the P-frame, same as all-intra would do for
+            // it. All-intra only *loses* the ability to cheaply skip/reuse
+            // the large unchanged regions (background, margins) between
+            // frames, raising the bit cost for the same quality. And at
+            // 20Mbps + uncapped native resolution it made things measurably
+            // worse (choppy framerate, washed-out colors — classic real-
+            // time-encoder-overload symptoms) while the wrong-font
+            // appearance persisted unchanged — which also rules out inter-
+            // frame prediction as that bug's cause, since making every frame
+            // fully independent didn't change it. No known upside left to
+            // pay all-intra's cost, so back to a normal 1s GOP.
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+            // CBR instead of the (likely) default VBR. This content is
+            // mostly one flat background color with sparse, thin, high-
+            // contrast glyphs on top — exactly the "low complexity" frame a
+            // VBR rate controller tends to under-spend bits on, which shows
+            // up as heavy quantization / washed-out color on the glyphs
+            // themselves even when the target bitrate looks generous on
+            // average. CBR forces it to actually spend close to the full
+            // target every frame.
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+            // outWidth/outHeight are now capped (see above) and fps lowered
+            // too, so this no longer needs to be as high as the previous
+            // (20Mbps, uncapped-resolution) attempt to look good — and lower
+            // is also lighter for the encoder to sustain in real time, on
+            // top of the extra headroom from dropping all-intra above.
+            setInteger(MediaFormat.KEY_BIT_RATE, 6_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 0)
         }
         val enc = try {
             MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
@@ -225,7 +279,7 @@ class VideoRecorder(
                 val current = provideFrame()
                 if (current != null) {
                     val (frame, geometry) = current
-                    Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
+                    Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, nativeWidth, nativeHeight, backgroundArgb)
                     drawFrameToSurfaceGl()
                 }
                 nextFrameAt += frameIntervalMs
@@ -470,6 +524,12 @@ class VideoRecorder(
 
     companion object {
         private const val TAG = "VideoRecorder"
+
+        // Cap on the encoder's target long edge — see the outWidth/outHeight
+        // doc comment above for why this is applied downstream of (native-
+        // resolution) text rasterization rather than fed into it.
+        private const val MAX_ENCODER_DIM = 720
+
         private fun align16(v: Int): Int = ((v + 15) / 16) * 16
 
         // Not defined in EGL14 itself; required in the config attribs so the

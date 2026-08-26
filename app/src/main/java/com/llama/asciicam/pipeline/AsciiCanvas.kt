@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.graphics.withClip
 
 /**
  * Draws one [AsciiFrameResult] using `nativeCanvas.drawText` per visible
@@ -56,33 +57,32 @@ fun AsciiCanvas(
             val offsetX = (size.width - contentW) / 2f
             val offsetY = (size.height - contentH) / 2f
 
-            val save = native.save()
-            native.clipRect(0f, 0f, size.width, size.height)
-            native.translate(offsetX, offsetY)
+            native.withClip(0f, 0f, size.width, size.height) {
+                translate(offsetX, offsetY)
 
-            val cols = geometry.cols
-            val rows = geometry.rows
-            val cellW = geometry.cellW
-            val rowPitch = geometry.rowPitch
-            val baseFontSize = geometry.fontSizePx
+                val cols = geometry.cols
+                val rows = geometry.rows
+                val cellW = geometry.cellW
+                val rowPitch = geometry.rowPitch
+                val baseFontSize = geometry.fontSizePx
 
-            for (y in 0 until rows) {
-                for (x in 0 until cols) {
-                    val idx = y * cols + x
-                    val span = frame.span[idx]
-                    if (span <= 0) continue
-                    val ch = frame.chars[idx]
-                    if (ch == ' ') continue
-                    val fontSize = baseFontSize * span
-                    paint.textSize = fontSize
-                    paint.color = frame.colors[idx]
-                    val cx = (x + span / 2f) * cellW
-                    val cy = (y + span / 2f) * rowPitch
-                    val baselineY = cy - baselineRatio * fontSize
-                    native.drawText(ch.toString(), cx, baselineY, paint)
+                for (y in 0 until rows) {
+                    for (x in 0 until cols) {
+                        val idx = y * cols + x
+                        val span = frame.span[idx]
+                        if (span <= 0) continue
+                        val ch = frame.chars[idx]
+                        if (ch == ' ') continue
+                        val fontSize = baseFontSize * span
+                        paint.textSize = fontSize
+                        paint.color = frame.colors[idx]
+                        val cx = (x + span / 2f) * cellW
+                        val cy = (y + span / 2f) * rowPitch
+                        val baselineY = cy - baselineRatio * fontSize
+                        drawText(ch.toString(), cx, baselineY, paint)
+                    }
                 }
             }
-            native.restoreToCount(save)
         }
     }
 }
