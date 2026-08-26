@@ -62,7 +62,9 @@ class VideoRecorder(
     private val outWidth = align16(requestedWidth)
     private val outHeight = align16(requestedHeight)
 
-    private val typeface = GlyphMetrics.typefaceFor(context, font)
+    // Independent instance, not the shared cached one — see
+    // GlyphMetrics.independentTypefaceFor's doc for why.
+    private val typeface = GlyphMetrics.independentTypefaceFor(context, font)
     private val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.typeface = typeface

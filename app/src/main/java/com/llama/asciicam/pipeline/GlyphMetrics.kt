@@ -37,6 +37,30 @@ object GlyphMetrics {
         FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
     }
 
+    /**
+     * Like [typefaceFor], but never returns the shared cached instance for
+     * MODERN_DOS — always loads a fresh, independent [Typeface] object.
+     *
+     * The live viewfinder draws continuously on the main thread while
+     * [com.llama.asciicam.pipeline.VideoRecorder] draws continuously on its
+     * own background thread — at the same time, for as long as a recording
+     * runs. Android's Typeface/glyph-rendering internals are documented as
+     * unsafe for *concurrent* use from multiple threads; a one-shot PNG
+     * export barely overlaps with the live view's drawing, but a multi-
+     * second recording maximizes exactly that race. Since every fix that
+     * assumed it was a *rendering-pipeline* bug (sizing, alignment, bitmap-
+     * vs-surface drawing) failed to change anything, and the font is proven
+     * (via logging) to be the same cached object every time, giving the
+     * recorder a private Typeface instance — sharing no native handle with
+     * whatever the UI thread is concurrently drawing with — is the next
+     * concrete thing left to try.
+     */
+    fun independentTypefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
+        FontChoice.MODERN_DOS -> loadModernDos(context) ?: Typeface.MONOSPACE
+        FontChoice.MONOSPACE -> Typeface.MONOSPACE
+        FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    }
+
     // Resources.getFont() is the plain platform API (available since API 26,
     // this app's minSdk) for loading a font resource — used directly instead
     // of AndroidX's ResourcesCompat.getFont(), which layers on a

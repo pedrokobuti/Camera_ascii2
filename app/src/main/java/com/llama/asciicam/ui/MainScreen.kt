@@ -259,7 +259,7 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                             shutterFlash.snapTo(0.85f)
                             shutterFlash.animateTo(0f, animationSpec = androidx.compose.animation.core.tween(220))
                         }
-                        viewModel.exportPng(context, 1080, 1440) { ok ->
+                        viewModel.exportPng(context) { ok ->
                             Toast.makeText(context, if (ok) "Saved PNG to Pictures/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -329,7 +329,7 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                             imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
                         onExportPng = {
-                            viewModel.exportPng(context, 1080, 1440) { ok ->
+                            viewModel.exportPng(context) { ok ->
                                 Toast.makeText(context, if (ok) "Saved PNG to Pictures/AsciiCam" else "Export failed", Toast.LENGTH_SHORT).show()
                             }
                         },

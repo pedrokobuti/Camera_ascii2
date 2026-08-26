@@ -230,11 +230,17 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun exportPng(context: android.content.Context, widthPx: Int, heightPx: Int, onDone: (Boolean) -> Unit) {
+    fun exportPng(context: android.content.Context, onDone: (Boolean) -> Unit) {
         val snapshot = render
         if (snapshot == null) { onDone(false); return }
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            // Use the geometry's own native content size — matching it exactly
+            // means Export.drawFrameInto's internal fit scale stays ~1.0 and
+            // there's no letterboxing. A previous hardcoded 1080x1440 rarely
+            // matched a phone's actual (much taller) aspect ratio.
+            val widthPx = (snapshot.geometry.cols * snapshot.geometry.cellW).toInt().coerceAtLeast(2)
+            val heightPx = (snapshot.geometry.rows * snapshot.geometry.rowPitch).toInt().coerceAtLeast(2)
             val bmp = Export.renderToBitmap(
                 context, snapshot.frame, snapshot.geometry, settings.font, bgArgb, widthPx, heightPx,
             )
