@@ -482,7 +482,7 @@ object AsciiPipeline {
             ColorMode.SOURCE -> argb(255, r, g, b)
             ColorMode.MONO -> 0xFFE8E8EA.toInt()
             ColorMode.PALETTE -> paletteColor(settings.paletteStops, v)
-            ColorMode.IMPOSTER -> paletteColor(IMPOSTER_PALETTE_STOPS, v)
+            ColorMode.IMPOSTER -> discretePaletteColor(IMPOSTER_PALETTE_STOPS, v)
         }
     }
 
@@ -490,7 +490,7 @@ object AsciiPipeline {
      * lands on the same color as a non-edge cell at the same brightness. */
     private fun edgeColorFor(settings: AsciiSettings, v: Float): Int = when (settings.edgeColorMode) {
         EdgeColorMode.CUSTOM -> settings.edgeColorArgb
-        EdgeColorMode.IMPOSTER -> paletteColor(IMPOSTER_PALETTE_STOPS.asReversed(), v)
+        EdgeColorMode.IMPOSTER -> discretePaletteColor(IMPOSTER_PALETTE_STOPS.asReversed(), v)
         EdgeColorMode.OFF -> settings.edgeColorArgb // unused by callers; OFF is gated before this is called
     }
 
@@ -507,6 +507,15 @@ object AsciiPipeline {
         val g = lerpInt((c0 shr 8) and 0xFF, (c1 shr 8) and 0xFF, frac)
         val b = lerpInt(c0 and 0xFF, c1 and 0xFF, frac)
         return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /** Unlike [paletteColor], never blends between adjacent stops — [v] just
+     * selects one of [stops] outright (equal-width brightness bins), so
+     * "1mposter colors" only ever draws exactly those 5 colors, verbatim. */
+    private fun discretePaletteColor(stops: List<PaletteStop>, v: Float): Int {
+        if (stops.isEmpty()) return 0xFFFFFFFF.toInt()
+        val idx = (v.coerceIn(0f, 0.999999f) * stops.size).toInt().coerceIn(0, stops.size - 1)
+        return parseHexColor(stops[idx].hex)
     }
 
     private fun lerpInt(a: Int, b: Int, t: Float): Int = (a + (b - a) * t).toInt().coerceIn(0, 255)

@@ -265,12 +265,23 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         if (isRecording || videoRecorder != null) { onStarted(false); return }
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
+            // Match the live viewport's aspect ratio (capped so encoding stays fast),
+            // not a fixed 1080x1440 — that hardcoded shape rarely matches an actual
+            // phone screen (usually much taller), so the content was getting shrunk
+            // to fit with black bars on the sides, and the resulting much-smaller,
+            // heavily-compressed text read as "a different font" once encoded.
+            val maxDim = 1080
+            val vw = viewportW.coerceAtLeast(1)
+            val vh = viewportH.coerceAtLeast(1)
+            val fitScale = (maxDim.toFloat() / maxOf(vw, vh)).coerceAtMost(1f)
+            val targetW = (vw * fitScale).toInt().coerceAtLeast(2)
+            val targetH = (vh * fitScale).toInt().coerceAtLeast(2)
             val recorder = VideoRecorder(
                 context = context,
                 font = settings.font,
                 backgroundArgb = bgArgb,
-                requestedWidth = 1080,
-                requestedHeight = 1440,
+                requestedWidth = targetW,
+                requestedHeight = targetH,
                 provideFrame = { render?.let { it.frame to it.geometry } },
             )
             val ok = recorder.start()
