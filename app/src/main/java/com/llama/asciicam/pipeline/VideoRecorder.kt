@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -51,6 +52,20 @@ import java.util.Locale
  * to-encoder pipelines use — is the standard, thoroughly-tested way these
  * surfaces are meant to be driven.
  *
+ * That rewrite alone didn't fix it either, which pointed further upstream —
+ * at the actual [Typeface] object text ends up drawn with. [typeface] is
+ * therefore resolved by the *caller* (see [GlyphMetrics.independentTypefaceFor]
+ * — used instead of the shared cache so this recorder never touches whatever
+ * Typeface object the live view is concurrently drawing with), and on the
+ * caller's own thread: [AsciiViewModel.startRecording] loads it before
+ * launching the background coroutine that constructs this class, i.e. on the
+ * main thread — the one thread every previously-correct render (live view,
+ * PNG export) has always resolved a font on. Loading it fresh from the
+ * recorder's own background thread instead was untested for this
+ * specific platform API and is a plausible way to silently end up with a
+ * substitute font without a single dropped frame or logged exception to show
+ * for it.
+ *
  * A dedicated thread resamples whatever [provideFrame] currently returns at a
  * fixed [fps] and feeds it in — there's no separate rendering pass, it's the
  * same data driving the live viewfinder. All EGL/GL setup and every GL call
@@ -63,7 +78,7 @@ import java.util.Locale
  */
 class VideoRecorder(
     private val context: Context,
-    font: FontChoice,
+    private val typeface: Typeface,
     private val backgroundArgb: Int,
     requestedWidth: Int,
     requestedHeight: Int,
@@ -113,9 +128,8 @@ class VideoRecorder(
     private val outWidth = align16((nativeWidth * encoderCapScale).toInt().coerceAtLeast(2))
     private val outHeight = align16((nativeHeight * encoderCapScale).toInt().coerceAtLeast(2))
 
-    // Independent instance, not the shared cached one — see
-    // GlyphMetrics.independentTypefaceFor's doc for why.
-    private val typeface = GlyphMetrics.independentTypefaceFor(context, font)
+    // typeface is a constructor param now — loaded by the caller, on the
+    // caller's (main) thread; see the class doc comment for why.
     private val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.typeface = typeface

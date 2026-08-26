@@ -269,6 +269,25 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
      * (encoder/MediaStore) actually succeeded. */
     fun startRecording(context: android.content.Context, onStarted: (Boolean) -> Unit) {
         if (isRecording || videoRecorder != null) { onStarted(false); return }
+        // Resolved here, synchronously, on the caller's thread — startRecording
+        // is invoked directly from a Compose click handler, i.e. this runs on
+        // the main thread, same as every other typeface load in the app that's
+        // ever produced the correct font (live view, PNG export). The recorder
+        // previously loaded its own independent Typeface from inside the
+        // viewModelScope.launch(Dispatchers.Default) block below — a background
+        // thread — which was an untested path for this platform API and is a
+        // plausible way to silently end up with a substitute font.
+        val typeface = GlyphMetrics.independentTypefaceFor(context, settings.font)
+        // Cheap, hard-to-miss confirmation of the one thing every previous
+        // fix attempt for the wrong-font-in-recordings bug had to guess at:
+        // whether this actually is the real Modern DOS typeface, or the
+        // MONOSPACE fallback loadModernDos() silently falls back to on
+        // failure. Filter Logcat for "AsciiViewModel" while recording.
+        android.util.Log.i(
+            "AsciiViewModel",
+            "recording typeface: isMonospaceFallback=${typeface === android.graphics.Typeface.MONOSPACE} " +
+                "identity=${System.identityHashCode(typeface)} font=${settings.font}",
+        )
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
             // Use the live geometry's actual native content size (cols*cellW x
@@ -305,7 +324,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             }
             val recorder = VideoRecorder(
                 context = context,
-                font = settings.font,
+                typeface = typeface,
                 backgroundArgb = bgArgb,
                 requestedWidth = targetW,
                 requestedHeight = targetH,

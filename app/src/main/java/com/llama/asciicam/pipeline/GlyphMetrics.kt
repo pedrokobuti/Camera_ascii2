@@ -41,19 +41,30 @@ object GlyphMetrics {
      * Like [typefaceFor], but never returns the shared cached instance for
      * MODERN_DOS — always loads a fresh, independent [Typeface] object.
      *
-     * The live viewfinder draws continuously on the main thread while
-     * [com.llama.asciicam.pipeline.VideoRecorder] draws continuously on its
-     * own background thread — at the same time, for as long as a recording
-     * runs. Android's Typeface/glyph-rendering internals are documented as
-     * unsafe for *concurrent* use from multiple threads; a one-shot PNG
-     * export barely overlaps with the live view's drawing, but a multi-
-     * second recording maximizes exactly that race. Since every fix that
-     * assumed it was a *rendering-pipeline* bug (sizing, alignment, bitmap-
-     * vs-surface drawing) failed to change anything, and the font is proven
-     * (via logging) to be the same cached object every time, giving the
-     * recorder a private Typeface instance — sharing no native handle with
-     * whatever the UI thread is concurrently drawing with — is the next
-     * concrete thing left to try.
+     * Callers MUST call this from the main thread. The live viewfinder and
+     * PNG export have only ever loaded fonts from the main thread and have
+     * always rendered the correct font; a recording, uniquely, used to load
+     * its own copy from [com.llama.asciicam.pipeline.VideoRecorder]'s
+     * dedicated background thread instead — and recorded video, uniquely,
+     * has shown an obviously wrong, generic-looking font (confirmed by
+     * screenshot: different glyph outlines entirely, not blur or a scaling
+     * artifact — e.g. '%' and '*' rendering as a plain sans-serif font's
+     * shapes instead of "Modern DOS 8x8"'s blocky pixel-art ones). Loading
+     * fonts off the main thread is a documented source of exactly this
+     * failure mode for [androidx.core.content.res.ResourcesCompat.getFont]
+     * (see [loadModernDos]'s comment on why this uses the plain platform API
+     * instead) — this was never actually confirmed to be safe for
+     * `Resources.getFont()` either, it was just assumed switching APIs would
+     * be enough. [com.llama.asciicam.ui.AsciiViewModel.startRecording] now
+     * calls this synchronously, before launching the background coroutine
+     * that constructs the recorder, specifically so the load happens on the
+     * same thread as every font load that's ever come out correct.
+     *
+     * Kept as a fresh instance (rather than switching to the shared
+     * [typefaceFor] cache now that the thread is fixed) so the recorder still
+     * never shares a native Typeface handle with whatever the live view is
+     * concurrently drawing with during the recording itself — changing one
+     * variable (which thread *loads* it) at a time.
      */
     fun independentTypefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
         FontChoice.MODERN_DOS -> loadModernDos(context) ?: Typeface.MONOSPACE
@@ -67,12 +78,19 @@ object GlyphMetrics {
     // compatibility shim (with its own async-callback machinery and internal
     // cache) that this minSdk doesn't need and that has had known edge cases
     // returning null/a substitute font on some devices when called off the
-    // main thread.
-    private fun loadModernDos(context: Context): Typeface? = try {
-        context.resources.getFont(R.font.modern_dos_8x8)
-    } catch (e: Exception) {
-        Log.e("GlyphMetrics", "Failed to load modern_dos_8x8 font", e)
-        null
+    // main thread. One retry on failure: callers are now expected to call
+    // this from the main thread (see independentTypefaceFor's doc), which
+    // rules out the main suspected cause of a transient failure here, but a
+    // single retry is nearly free insurance against any other one.
+    private fun loadModernDos(context: Context): Typeface? {
+        repeat(2) { attempt ->
+            try {
+                return context.resources.getFont(R.font.modern_dos_8x8)
+            } catch (e: Exception) {
+                Log.e("GlyphMetrics", "Failed to load modern_dos_8x8 font (attempt ${attempt + 1})", e)
+            }
+        }
+        return null
     }
 
     /** width/height ratio of a representative glyph, used to derive cell width from font size. */
