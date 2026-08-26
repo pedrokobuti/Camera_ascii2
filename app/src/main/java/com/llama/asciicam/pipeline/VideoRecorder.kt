@@ -10,11 +10,22 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLExt
+import android.opengl.EGLSurface
+import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
 import android.view.Surface
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -23,19 +34,28 @@ import java.util.Locale
  * Records the live ASCII output to an audio-less MP4. There's no camera/
  * screen frame to just forward — the "video" is synthesized frame by frame.
  * Each frame is first rendered into a plain [Bitmap] via [Export.drawFrameInto]
- * — the exact same call PNG export makes — and only that finished bitmap is
- * blitted onto the [MediaCodec] encoder's input Surface (via
- * [Surface.lockCanvas]/[Surface.unlockCanvasAndPost]). Drawing text directly
- * on the encoder surface's own locked Canvas was tried first, but on-device
- * that canvas didn't reliably honor the embedded custom typeface — it fell
- * back toward a generic font, unlike a normal Bitmap-backed Canvas. Routing
- * through a Bitmap first guarantees a recorded frame looks exactly like a PNG
- * snapshot of the same moment, since only a trivial drawBitmap (no text)
- * touches the encoder surface's canvas.
+ * — the exact same call PNG export makes, proven correct by dumping it
+ * directly to a PNG mid-recording — then uploaded as a GL texture and drawn
+ * onto the [MediaCodec] encoder's input Surface via OpenGL ES (a full-screen
+ * textured quad, [EGL14.eglSwapBuffers] submitting each frame).
+ *
+ * An earlier version fed frames to the encoder surface via
+ * [Surface.lockCanvas]/`drawBitmap` (software rendering). That produced a
+ * video where the ASCII glyphs rendered in a completely different, generic-
+ * looking font — confirmed (by dumping the pre-submission Bitmap to a PNG
+ * bypassing the encoder entirely) to already be *correct* at that point, so
+ * the corruption was happening specifically in how that Bitmap reached the
+ * encoder. `Surface.lockCanvas()` on a `MediaCodec.createInputSurface()`
+ * Surface is a supported but less-common path; feeding such a surface via
+ * OpenGL ES — the same technique Android's own screen-recording and camera-
+ * to-encoder pipelines use — is the standard, thoroughly-tested way these
+ * surfaces are meant to be driven.
  *
  * A dedicated thread resamples whatever [provideFrame] currently returns at a
  * fixed [fps] and feeds it in — there's no separate rendering pass, it's the
- * same data driving the live viewfinder.
+ * same data driving the live viewfinder. All EGL/GL setup and every GL call
+ * happen on that same thread (an EGL context is only usable on the thread
+ * it's current on).
  *
  * [provideFrame] deliberately doesn't reference AsciiViewModel directly, to
  * keep this class decoupled from Compose/ViewModel plumbing — the caller
@@ -54,11 +74,7 @@ class VideoRecorder(
     // H.264 hardware encoders operate on 16x16 macroblocks; a Surface-input
     // size that isn't a multiple of 16 on both axes is a well-known source of
     // on-device distortion (padding/scaling to the macroblock grid handled
-    // inconsistently across vendors) — e.g. the previously-hardcoded 1080 is
-    // NOT 16-aligned (1080/16 = 67.5) while 1440 happens to be, which line up
-    // with exactly the kind of severe text-shape distortion reported here.
-    // Align both dimensions up-front so every buffer (Bitmap, MediaFormat,
-    // Surface) agrees on the same, safe size.
+    // inconsistently across vendors).
     private val outWidth = align16(requestedWidth)
     private val outHeight = align16(requestedHeight)
 
@@ -73,7 +89,7 @@ class VideoRecorder(
 
     // Reused across frames — one frame's worth of scratch memory, not
     // reallocated every ~40ms. Text is drawn into this (proven-correct)
-    // Bitmap canvas; the encoder surface only ever receives a plain blit.
+    // Bitmap canvas; only its finished pixels ever reach the encoder.
     private val frameBitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
     private val frameBitmapCanvas = Canvas(frameBitmap)
 
@@ -86,6 +102,16 @@ class VideoRecorder(
     private var muxerStarted = false
     private var thread: Thread? = null
     @Volatile private var recording = false
+
+    // EGL/GL state — created and used exclusively on the recording thread.
+    private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
+    private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
+    private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var glProgram = 0
+    private var glTexture = 0
+    private var positionHandle = 0
+    private var texCoordHandle = 0
+    private var textureUniform = 0
 
     /** Starts encoding on a dedicated background thread. Must be called off the
      * main thread (does content-resolver / MediaCodec setup). Returns false if
@@ -160,18 +186,21 @@ class VideoRecorder(
         thread = null
     }
 
-    // TEMPORARY diagnostic — remove once the video-font bug is found. Saves
-    // the exact bitmap about to be handed to the video encoder as a PNG, the
-    // very first time a frame is drawn each recording — bypassing
-    // MediaCodec/the muxer/video playback entirely, so we can tell whether
-    // the wrong font is already present in the bitmap itself (a drawing bug)
-    // or only appears after the encoder/surface/playback pipeline touches it
-    // (an encoding bug).
-    @Volatile private var debugDumped = false
-
     private fun runLoop() {
         val enc = codec ?: return
         val surface = inputSurface ?: return
+
+        try {
+            setupEgl(surface)
+            setupGl()
+        } catch (e: Exception) {
+            Log.e(TAG, "EGL/GL setup failed", e)
+            recording = false
+            releaseEgl()
+            finish()
+            return
+        }
+
         val frameIntervalMs = 1000L / fps
         var nextFrameAt = System.currentTimeMillis()
 
@@ -184,21 +213,7 @@ class VideoRecorder(
                 if (current != null) {
                     val (frame, geometry) = current
                     Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
-                    if (!debugDumped) {
-                        debugDumped = true
-                        try {
-                            Export.savePng(context, frameBitmap)
-                            Log.i(TAG, "DEBUG: dumped pre-encode frame to Pictures/AsciiCam")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "DEBUG: failed to dump pre-encode frame", e)
-                        }
-                    }
-                    val surfaceCanvas = surface.lockCanvas(null)
-                    try {
-                        surfaceCanvas.drawBitmap(frameBitmap, 0f, 0f, null)
-                    } finally {
-                        surface.unlockCanvasAndPost(surfaceCanvas)
-                    }
+                    drawFrameToSurfaceGl()
                 }
                 nextFrameAt += frameIntervalMs
                 if (nextFrameAt < now) nextFrameAt = now + frameIntervalMs
@@ -212,8 +227,133 @@ class VideoRecorder(
             Log.e(TAG, "signalEndOfInputStream failed", e)
         }
         drainEncoder(enc, endOfStream = true)
+        releaseEgl()
         finish()
     }
+
+    // ---------- EGL / GL ----------
+
+    private fun setupEgl(surface: Surface) {
+        eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY) throw RuntimeException("eglGetDisplay failed")
+        val version = IntArray(2)
+        if (!EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) {
+            throw RuntimeException("eglInitialize failed")
+        }
+
+        val attribList = intArrayOf(
+            EGL14.EGL_RED_SIZE, 8,
+            EGL14.EGL_GREEN_SIZE, 8,
+            EGL14.EGL_BLUE_SIZE, 8,
+            EGL14.EGL_ALPHA_SIZE, 8,
+            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+            EGL_RECORDABLE_ANDROID, 1,
+            EGL14.EGL_NONE,
+        )
+        val configs = arrayOfNulls<EGLConfig>(1)
+        val numConfigs = IntArray(1)
+        if (!EGL14.eglChooseConfig(eglDisplay, attribList, 0, configs, 0, 1, numConfigs, 0) || numConfigs[0] == 0) {
+            throw RuntimeException("eglChooseConfig failed")
+        }
+        val config = configs[0] ?: throw RuntimeException("eglChooseConfig returned no config")
+
+        val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
+        eglContext = EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
+        if (eglContext == EGL14.EGL_NO_CONTEXT) throw RuntimeException("eglCreateContext failed")
+
+        val surfaceAttribs = intArrayOf(EGL14.EGL_NONE)
+        eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, config, surface, surfaceAttribs, 0)
+        if (eglSurface == EGL14.EGL_NO_SURFACE) throw RuntimeException("eglCreateWindowSurface failed")
+
+        if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+            throw RuntimeException("eglMakeCurrent failed")
+        }
+    }
+
+    private fun setupGl() {
+        val vertexShader = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER_SRC)
+        val fragmentShader = compileShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER_SRC)
+        glProgram = GLES20.glCreateProgram()
+        GLES20.glAttachShader(glProgram, vertexShader)
+        GLES20.glAttachShader(glProgram, fragmentShader)
+        GLES20.glLinkProgram(glProgram)
+        val linkStatus = IntArray(1)
+        GLES20.glGetProgramiv(glProgram, GLES20.GL_LINK_STATUS, linkStatus, 0)
+        if (linkStatus[0] == 0) {
+            val log = GLES20.glGetProgramInfoLog(glProgram)
+            GLES20.glDeleteProgram(glProgram)
+            throw RuntimeException("Program link failed: $log")
+        }
+
+        positionHandle = GLES20.glGetAttribLocation(glProgram, "aPosition")
+        texCoordHandle = GLES20.glGetAttribLocation(glProgram, "aTexCoord")
+        textureUniform = GLES20.glGetUniformLocation(glProgram, "uTexture")
+
+        val textures = IntArray(1)
+        GLES20.glGenTextures(1, textures, 0)
+        glTexture = textures[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, glTexture)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+    }
+
+    private fun compileShader(type: Int, src: String): Int {
+        val shader = GLES20.glCreateShader(type)
+        GLES20.glShaderSource(shader, src)
+        GLES20.glCompileShader(shader)
+        val status = IntArray(1)
+        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
+        if (status[0] == 0) {
+            val log = GLES20.glGetShaderInfoLog(shader)
+            GLES20.glDeleteShader(shader)
+            throw RuntimeException("Shader compile failed: $log")
+        }
+        return shader
+    }
+
+    private fun drawFrameToSurfaceGl() {
+        GLES20.glViewport(0, 0, outWidth, outHeight)
+        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+        GLES20.glUseProgram(glProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, glTexture)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, frameBitmap, 0)
+        GLES20.glUniform1i(textureUniform, 0)
+
+        VERTEX_DATA.position(0)
+        GLES20.glEnableVertexAttribArray(positionHandle)
+        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, VERTEX_DATA)
+
+        VERTEX_DATA.position(2)
+        GLES20.glEnableVertexAttribArray(texCoordHandle)
+        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, VERTEX_STRIDE_BYTES, VERTEX_DATA)
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+        GLES20.glDisableVertexAttribArray(positionHandle)
+        GLES20.glDisableVertexAttribArray(texCoordHandle)
+
+        EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, System.nanoTime())
+        EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+    }
+
+    private fun releaseEgl() {
+        if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+            if (eglSurface != EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(eglDisplay, eglSurface)
+            if (eglContext != EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(eglDisplay, eglContext)
+            EGL14.eglTerminate(eglDisplay)
+        }
+        eglDisplay = EGL14.EGL_NO_DISPLAY
+        eglContext = EGL14.EGL_NO_CONTEXT
+        eglSurface = EGL14.EGL_NO_SURFACE
+    }
+
+    // ---------- MediaCodec / MediaMuxer ----------
 
     private val bufferInfo = MediaCodec.BufferInfo()
 
@@ -318,5 +458,48 @@ class VideoRecorder(
     companion object {
         private const val TAG = "VideoRecorder"
         private fun align16(v: Int): Int = ((v + 15) / 16) * 16
+
+        // Not defined in EGL14 itself; required in the config attribs so the
+        // chosen config is guaranteed compatible with MediaCodec's input surface.
+        private const val EGL_RECORDABLE_ANDROID = 0x3142
+
+        private const val VERTEX_STRIDE_BYTES = 4 * 4 // 4 floats/vertex * 4 bytes/float
+
+        private val VERTEX_SHADER_SRC = """
+            attribute vec4 aPosition;
+            attribute vec2 aTexCoord;
+            varying vec2 vTexCoord;
+            void main() {
+                gl_Position = aPosition;
+                vTexCoord = aTexCoord;
+            }
+        """.trimIndent()
+
+        private val FRAGMENT_SHADER_SRC = """
+            precision mediump float;
+            varying vec2 vTexCoord;
+            uniform sampler2D uTexture;
+            void main() {
+                gl_FragColor = texture2D(uTexture, vTexCoord);
+            }
+        """.trimIndent()
+
+        // Full-screen triangle strip: clip-space (x,y) + texture (u,v) per vertex.
+        // Bitmap row 0 (its top) is uploaded to texture v=0; pairing that with
+        // screen-space y=+1 (top of the viewport) keeps the image right-side up.
+        private val VERTEX_DATA: FloatBuffer = ByteBuffer.allocateDirect(4 * VERTEX_STRIDE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .apply {
+                put(
+                    floatArrayOf(
+                        -1f, -1f, 0f, 1f, // bottom-left
+                        1f, -1f, 1f, 1f, // bottom-right
+                        -1f, 1f, 0f, 0f, // top-left
+                        1f, 1f, 1f, 0f, // top-right
+                    ),
+                )
+                position(0)
+            }
     }
 }
