@@ -270,16 +270,22 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
      * diagnostic string for the caller to surface (see [RECORDING_BUILD_MARKER]). */
     fun startRecording(context: android.content.Context, onStarted: (Boolean, String) -> Unit) {
         if (isRecording || videoRecorder != null) { onStarted(false, "already recording"); return }
-        // Resolved here, synchronously, on the caller's thread — startRecording
-        // is invoked directly from a Compose click handler, i.e. this runs on
-        // the main thread, same as every other typeface load in the app that's
-        // ever produced the correct font (live view, PNG export). The recorder
-        // previously loaded its own independent Typeface from inside the
-        // viewModelScope.launch(Dispatchers.Default) block below — a background
-        // thread — which was an untested path for this platform API and is a
-        // plausible way to silently end up with a substitute font.
-        val typeface = GlyphMetrics.independentTypefaceFor(context, settings.font)
-        val usingFallbackFont = typeface === android.graphics.Typeface.MONOSPACE
+        // The *same shared cached* Typeface instance the live viewfinder and
+        // PNG export draw with — not a second, independently-loaded copy.
+        //
+        // The recorder used to load its own via a dedicated
+        // GlyphMetrics.independentTypefaceFor(); it was the only caller in the
+        // app that did, and recorded video was the only output that ever came
+        // out in the wrong font. The glyph shapes in the recording (slashed
+        // zero, 6-point asterisk) identify it as Typeface.MONOSPACE — the
+        // fallback returned when the font resource fails to load — so that
+        // second load was failing while the first, cached one had succeeded.
+        // Sharing one instance is also simply correct: Typeface is immutable
+        // and safe to draw with from multiple threads (Paint isn't, and each
+        // path already builds its own).
+        val typeface = GlyphMetrics.typefaceFor(context, settings.font)
+        val usingFallbackFont = settings.font == com.llama.asciicam.pipeline.FontChoice.MODERN_DOS &&
+            typeface === android.graphics.Typeface.MONOSPACE
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
             // Use the live geometry's actual native content size (cols*cellW x
@@ -332,8 +338,20 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             // every older one, so a full-resolution number here means a stale
             // APK. The font flag reports whether the Modern DOS typeface
             // actually loaded or silently fell back to MONOSPACE.
+            // "tf" pairs the recorder's real draw-time typeface identity with
+            // the live view's. They must match now that both come from the one
+            // shared cached instance; if a recording still comes out in the
+            // wrong font while these agree, the typeface is finally ruled out
+            // and the fault is downstream of drawing.
+            val liveTypefaceIdentity = System.identityHashCode(typeface)
+            val tfNote = if (recorder.paintTypefaceIdentity == liveTypefaceIdentity) {
+                "tf=match"
+            } else {
+                "tf=MISMATCH(${recorder.paintTypefaceIdentity}≠$liveTypefaceIdentity)"
+            }
             val diagnostic = "$RECORDING_BUILD_MARKER · ${recorder.outWidth}x${recorder.outHeight} " +
-                "(${recorder.sizeNote}) · " + if (usingFallbackFont) "FONT=FALLBACK" else "font ok"
+                "(${recorder.sizeNote}) · " + (if (usingFallbackFont) "FONT=FALLBACK" else "font ok") +
+                " · $tfNote"
             android.util.Log.i("AsciiViewModel", "startRecording: ok=$ok $diagnostic")
             withContext(Dispatchers.Main) {
                 if (ok) {
@@ -375,6 +393,6 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
          * "nothing changed at all" are indistinguishable from a stale APK
          * otherwise, and that ambiguity has cost more than the fixes have.
          */
-        const val RECORDING_BUILD_MARKER = "build-10"
+        const val RECORDING_BUILD_MARKER = "build-11"
     }
 }

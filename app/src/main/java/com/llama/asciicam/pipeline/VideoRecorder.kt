@@ -54,18 +54,22 @@ import java.util.Locale
  * surfaces are meant to be driven.
  *
  * That rewrite alone didn't fix it either, which pointed further upstream —
- * at the actual [Typeface] object text ends up drawn with. [typeface] is
- * therefore resolved by the *caller* (see [GlyphMetrics.independentTypefaceFor]
- * — used instead of the shared cache so this recorder never touches whatever
- * Typeface object the live view is concurrently drawing with), and on the
- * caller's own thread: [AsciiViewModel.startRecording] loads it before
- * launching the background coroutine that constructs this class, i.e. on the
- * main thread — the one thread every previously-correct render (live view,
- * PNG export) has always resolved a font on. Loading it fresh from the
- * recorder's own background thread instead was untested for this
- * specific platform API and is a plausible way to silently end up with a
- * substitute font without a single dropped frame or logged exception to show
- * for it.
+ * at the actual [Typeface] object the text gets drawn with. [typeface] is a
+ * constructor parameter, and the caller is expected to pass the *same shared
+ * cached instance* the live viewfinder and PNG export draw with (see
+ * [GlyphMetrics.typefaceFor]).
+ *
+ * This class briefly loaded its own second, independent copy instead, on a
+ * never-confirmed theory that sharing a Typeface across threads was unsafe.
+ * It isn't: Typeface is immutable and safe to draw with concurrently — Paint
+ * is the object that can't be shared, and this class builds its own. The
+ * correlation pointed the other way anyway: the recorder was the only caller
+ * in the app loading its own copy, and recorded video was the only output
+ * that ever came out in the wrong font — specifically Roboto/Droid Sans
+ * Mono's glyph shapes (slashed zero, 6-point asterisk), i.e.
+ * [Typeface.MONOSPACE], which is exactly the fallback returned when the font
+ * resource fails to load. So that second load was failing while the cached
+ * one had already succeeded.
  *
  * A dedicated thread resamples whatever [provideFrame] currently returns at a
  * fixed [fps] and feeds it in — there's no separate rendering pass, it's the
@@ -131,13 +135,24 @@ class VideoRecorder(
      * fact about how the output will look. */
     val sizeNote: String get() = chosenSize.note
 
-    // typeface is a constructor param now — loaded by the caller, on the
-    // caller's (main) thread; see the class doc comment for why.
+    // typeface is a constructor param — the caller passes in the same shared
+    // instance the live view draws with; see the class doc comment.
     private val baselineRatio = GlyphMetrics.measureBaselineOffsetRatio(typeface)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.typeface = typeface
         textAlign = Paint.Align.CENTER
     }
+
+    /**
+     * Identity of the [Typeface] this recorder will actually draw every glyph
+     * with, read back off the constructed [Paint] rather than from the
+     * constructor argument — so it reports what will really be used, not what
+     * was intended. Compared against the live view's in the recording
+     * diagnostic: if a recording ever comes out in the wrong font again, this
+     * says immediately whether the wrong font was already selected here or
+     * whether something downstream of drawing is at fault.
+     */
+    val paintTypefaceIdentity: Int get() = System.identityHashCode(paint.typeface)
 
     // Reused across frames — one frame's worth of scratch memory, not
     // reallocated every ~40ms. Text is drawn into this (proven-correct),

@@ -37,51 +37,25 @@ object GlyphMetrics {
         FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
     }
 
-    /**
-     * Like [typefaceFor], but never returns the shared cached instance for
-     * MODERN_DOS — always loads a fresh, independent [Typeface] object.
-     *
-     * Callers MUST call this from the main thread. The live viewfinder and
-     * PNG export have only ever loaded fonts from the main thread and have
-     * always rendered the correct font; a recording, uniquely, used to load
-     * its own copy from [com.llama.asciicam.pipeline.VideoRecorder]'s
-     * dedicated background thread instead — and recorded video, uniquely,
-     * has shown an obviously wrong, generic-looking font (confirmed by
-     * screenshot: different glyph outlines entirely, not blur or a scaling
-     * artifact — e.g. '%' and '*' rendering as a plain sans-serif font's
-     * shapes instead of "Modern DOS 8x8"'s blocky pixel-art ones). Loading
-     * fonts off the main thread is a documented source of exactly this
-     * failure mode for [androidx.core.content.res.ResourcesCompat.getFont]
-     * (see [loadModernDos]'s comment on why this uses the plain platform API
-     * instead) — this was never actually confirmed to be safe for
-     * `Resources.getFont()` either, it was just assumed switching APIs would
-     * be enough. [com.llama.asciicam.ui.AsciiViewModel.startRecording] now
-     * calls this synchronously, before launching the background coroutine
-     * that constructs the recorder, specifically so the load happens on the
-     * same thread as every font load that's ever come out correct.
-     *
-     * Kept as a fresh instance (rather than switching to the shared
-     * [typefaceFor] cache now that the thread is fixed) so the recorder still
-     * never shares a native Typeface handle with whatever the live view is
-     * concurrently drawing with during the recording itself — changing one
-     * variable (which thread *loads* it) at a time.
-     */
-    fun independentTypefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
-        FontChoice.MODERN_DOS -> loadModernDos(context) ?: Typeface.MONOSPACE
-        FontChoice.MONOSPACE -> Typeface.MONOSPACE
-        FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
-    }
-
     // Resources.getFont() is the plain platform API (available since API 26,
     // this app's minSdk) for loading a font resource — used directly instead
     // of AndroidX's ResourcesCompat.getFont(), which layers on a
     // compatibility shim (with its own async-callback machinery and internal
     // cache) that this minSdk doesn't need and that has had known edge cases
-    // returning null/a substitute font on some devices when called off the
-    // main thread. One retry on failure: callers are now expected to call
-    // this from the main thread (see independentTypefaceFor's doc), which
-    // rules out the main suspected cause of a transient failure here, but a
-    // single retry is nearly free insurance against any other one.
+    // returning null/a substitute font on some devices.
+    //
+    // There is deliberately no "load a second, independent copy" variant. One
+    // used to exist, for VideoRecorder only, on a never-confirmed theory that
+    // sharing a Typeface across threads was unsafe. It isn't — Typeface is
+    // immutable and safe to *draw* with concurrently; it's Paint that can't be
+    // shared, and each drawing path already builds its own. Meanwhile the
+    // correlation was exact: the recorder was the only caller that loaded its
+    // own copy, and recorded video was the only output that ever came out in
+    // the wrong font (Roboto/Droid Sans Mono's glyph shapes — a slashed zero
+    // and a 6-point asterisk — i.e. Typeface.MONOSPACE, the fallback returned
+    // when this function fails). Everything drawing from the single cached
+    // instance has always been correct, so there is now exactly one way to get
+    // a Typeface here and every path shares it.
     private fun loadModernDos(context: Context): Typeface? {
         repeat(2) { attempt ->
             try {
