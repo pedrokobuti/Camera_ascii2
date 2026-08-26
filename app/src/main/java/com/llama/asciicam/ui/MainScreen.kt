@@ -241,8 +241,16 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                                 Toast.makeText(context, if (ok) "Saved video to Movies/AsciiCam" else "Recording failed", Toast.LENGTH_SHORT).show()
                             }
                         } else {
-                            viewModel.startRecording(context) { ok ->
-                                if (!ok) Toast.makeText(context, "Couldn't start recording", Toast.LENGTH_SHORT).show()
+                            viewModel.startRecording(context) { ok, diagnostic ->
+                                // Always shown, not just on failure: `diagnostic`
+                                // carries the build marker, the encoder's real
+                                // output size and whether the font loaded — the
+                                // on-device evidence for which build is running.
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "REC $diagnostic" else "Couldn't start recording · $diagnostic",
+                                    Toast.LENGTH_LONG,
+                                ).show()
                             }
                         }
                     }

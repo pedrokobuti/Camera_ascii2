@@ -266,9 +266,10 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Starts recording the live ASCII output to Movies/AsciiCam as an MP4.
      * A no-op if already recording. [onStarted] reports whether setup
-     * (encoder/MediaStore) actually succeeded. */
-    fun startRecording(context: android.content.Context, onStarted: (Boolean) -> Unit) {
-        if (isRecording || videoRecorder != null) { onStarted(false); return }
+     * (encoder/MediaStore) actually succeeded, plus a short human-readable
+     * diagnostic string for the caller to surface (see [RECORDING_BUILD_MARKER]). */
+    fun startRecording(context: android.content.Context, onStarted: (Boolean, String) -> Unit) {
+        if (isRecording || videoRecorder != null) { onStarted(false, "already recording"); return }
         // Resolved here, synchronously, on the caller's thread — startRecording
         // is invoked directly from a Compose click handler, i.e. this runs on
         // the main thread, same as every other typeface load in the app that's
@@ -278,16 +279,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         // thread — which was an untested path for this platform API and is a
         // plausible way to silently end up with a substitute font.
         val typeface = GlyphMetrics.independentTypefaceFor(context, settings.font)
-        // Cheap, hard-to-miss confirmation of the one thing every previous
-        // fix attempt for the wrong-font-in-recordings bug had to guess at:
-        // whether this actually is the real Modern DOS typeface, or the
-        // MONOSPACE fallback loadModernDos() silently falls back to on
-        // failure. Filter Logcat for "AsciiViewModel" while recording.
-        android.util.Log.i(
-            "AsciiViewModel",
-            "recording typeface: isMonospaceFallback=${typeface === android.graphics.Typeface.MONOSPACE} " +
-                "identity=${System.identityHashCode(typeface)} font=${settings.font}",
-        )
+        val usingFallbackFont = typeface === android.graphics.Typeface.MONOSPACE
         viewModelScope.launch(Dispatchers.Default) {
             val bgArgb = if (settings.invert) android.graphics.Color.WHITE else android.graphics.Color.BLACK
             // Use the live geometry's actual native content size (cols*cellW x
@@ -331,12 +323,24 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
                 provideFrame = { render?.let { it.frame to it.geometry } },
             )
             val ok = recorder.start()
+            // Surfaced on-screen (a Toast — Logcat needs adb, which isn't set
+            // up on the test machine) because after this many failed fixes the
+            // thing most worth establishing is no longer "which fix works" but
+            // "is the phone even running the code I pushed". Both of these are
+            // decisive: the build marker is bumped every push, and the encoder
+            // size is capped by this build (MAX_ENCODER_DIM) but uncapped in
+            // every older one, so a full-resolution number here means a stale
+            // APK. The font flag reports whether the Modern DOS typeface
+            // actually loaded or silently fell back to MONOSPACE.
+            val diagnostic = "$RECORDING_BUILD_MARKER · ${recorder.outWidth}x${recorder.outHeight} · " +
+                if (usingFallbackFont) "FONT=FALLBACK" else "font ok"
+            android.util.Log.i("AsciiViewModel", "startRecording: ok=$ok $diagnostic")
             withContext(Dispatchers.Main) {
                 if (ok) {
                     videoRecorder = recorder
                     isRecording = true
                 }
-                onStarted(ok)
+                onStarted(ok, diagnostic)
             }
         }
     }
@@ -361,5 +365,16 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             // already cancelled by the time onCleared() runs.
             Thread { r.stop() }.start()
         }
+    }
+
+    companion object {
+        /**
+         * Bumped on every push while the recording bug is being chased. Shown
+         * in the toast when a recording starts, purely so it's unambiguous
+         * on-device which build is actually installed — several rounds of
+         * "nothing changed at all" are indistinguishable from a stale APK
+         * otherwise, and that ambiguity has cost more than the fixes have.
+         */
+        const val RECORDING_BUILD_MARKER = "build-9"
     }
 }

@@ -124,9 +124,13 @@ class VideoRecorder(
     // ordinary bilinear minification does the downsizing — a uniform
     // "recorded at lower resolution" softening of the whole finished frame,
     // not a per-glyph rasterization change.
+    // Public so the caller can surface them (see AsciiViewModel's recording
+    // diagnostics) — the recorded file's actual pixel dimensions are the
+    // simplest external proof of which build is running, since a stale APK
+    // records at the uncapped native size instead.
     private val encoderCapScale = (MAX_ENCODER_DIM.toFloat() / maxOf(nativeWidth, nativeHeight)).coerceAtMost(1f)
-    private val outWidth = align16((nativeWidth * encoderCapScale).toInt().coerceAtLeast(2))
-    private val outHeight = align16((nativeHeight * encoderCapScale).toInt().coerceAtLeast(2))
+    val outWidth = align16((nativeWidth * encoderCapScale).toInt().coerceAtLeast(2))
+    val outHeight = align16((nativeHeight * encoderCapScale).toInt().coerceAtLeast(2))
 
     // typeface is a constructor param now — loaded by the caller, on the
     // caller's (main) thread; see the class doc comment for why.
