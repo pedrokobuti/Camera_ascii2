@@ -24,6 +24,10 @@ object GlyphMetrics {
     private const val PROBE_SIZE = 64f
     private const val DENSITY_BITMAP_SIZE = 32
 
+    /** Dense, full-height characters — the ones that set a font's apparent
+     * weight in ASCII art — used to measure ink extent in [inkHeightRatio]. */
+    private const val INK_PROBE_CHARS = "#@MWX8"
+
     // Cached only on success — a transient load failure must NOT get stuck
     // here, since that would silently poison every future caller (including
     // ones on a different thread, like VideoRecorder's) into the fallback
@@ -31,10 +35,61 @@ object GlyphMetrics {
     // completes on one thread is visible to callers on another right away.
     @Volatile private var cachedModernDos: Typeface? = null
 
-    fun typefaceFor(context: Context, font: FontChoice): Typeface = when (font) {
-        FontChoice.MODERN_DOS -> cachedModernDos ?: loadModernDos(context).also { cachedModernDos = it } ?: Typeface.MONOSPACE
-        FontChoice.MONOSPACE -> Typeface.MONOSPACE
-        FontChoice.SERIF_MONO -> Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+    fun typefaceFor(context: Context, font: FontChoice): Typeface =
+        if (font == FontChoice.MODERN_DOS) {
+            cachedModernDos ?: loadModernDos(context).also { cachedModernDos = it } ?: Typeface.MONOSPACE
+        } else {
+            // Typeface.create maintains its own internal cache, and falls back
+            // to the device default for a family it doesn't have.
+            font.systemFamily?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.MONOSPACE
+        }
+
+    /**
+     * Multiplier for the drawn text size that makes [font]'s glyphs occupy the
+     * same visual area inside a cell as the default Modern DOS font's do.
+     *
+     * The grid solves text size from each font's *advance width*, which lines
+     * the columns up but says nothing about how much of that space the glyph
+     * actually inks. Modern DOS is a pixel font whose marks sit well inside
+     * their advance; most system faces have far taller caps and heavier stems,
+     * so at the same advance-derived size they read as much bigger and crowd
+     * their cells. Normalising on measured ink height instead fixes that, and
+     * by construction returns exactly 1.0 for Modern DOS, so the default look
+     * is untouched.
+     *
+     * Deliberately affects only the drawn size, not [GridGeometry.rowPitch] or
+     * the row count — switching fonts should restyle the art, not relayout it.
+     */
+    fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
+        cachedScales[font]?.let { return it }
+        val reference = inkHeightRatio(typefaceFor(context, FontChoice.MODERN_DOS))
+        val own = inkHeightRatio(typefaceFor(context, font))
+        // Clamped: a pathological or missing face shouldn't be able to shrink
+        // the art to nothing or blow it up past its cell.
+        val scale = if (own <= 0.01f) 1f else (reference / own).coerceIn(0.35f, 1.5f)
+        cachedScales[font] = scale
+        return scale
+    }
+
+    private val cachedScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
+
+    /**
+     * Height of the inked pixels of a representative dense glyph set, relative
+     * to text size. Uses the union of a few characters rather than one, since
+     * any single glyph's height is an accident of that font's design.
+     */
+    private fun inkHeightRatio(typeface: Typeface): Float {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.typeface = typeface
+            textSize = PROBE_SIZE
+        }
+        val bounds = android.graphics.Rect()
+        var maxHeight = 0
+        for (ch in INK_PROBE_CHARS) {
+            paint.getTextBounds(ch.toString(), 0, 1, bounds)
+            if (bounds.height() > maxHeight) maxHeight = bounds.height()
+        }
+        return maxHeight / PROBE_SIZE
     }
 
     // Resources.getFont() is the plain platform API (available since API 26,

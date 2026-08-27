@@ -14,11 +14,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -201,19 +204,23 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                         showSettings = true
                     }
                     if (isRecording) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .border(1.dp, Hud.Danger, NotchedShape(5.dp))
+                                .padding(horizontal = 9.dp, vertical = 4.dp),
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
+                                    .size(7.dp)
                                     .clip(CircleShape)
-                                    .background(Color.Red),
+                                    .background(Hud.Danger),
                             )
                             Text(
                                 "REC",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(start = 6.dp),
+                                style = Hud.Readout,
+                                color = Hud.Danger,
+                                modifier = Modifier.padding(start = 7.dp),
                             )
                         }
                     }
@@ -339,9 +346,13 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 androidx.compose.material3.Surface(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .fillMaxWidth(0.5f),
-                    color = Color.Black,
-                    contentColor = Color.White,
+                        // Wider than the previous half-screen: the HUD layout
+                        // puts a framed panel around each section, and at 50%
+                        // the labelled slider rows had no room to breathe.
+                        .fillMaxWidth(0.66f),
+                    color = Hud.Bg,
+                    contentColor = Hud.TextPrimary,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Hud.LineDim),
                 ) {
                     Box(
                         modifier = Modifier
@@ -418,23 +429,35 @@ private fun ModeSelectorRow(selected: MediaSource, onSelect: (MediaSource) -> Un
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         modes.forEach { (source, label) ->
             val isSelected = source == selected
-            Box(
+            // Selected mode gets a bracketed readout rather than a pill, to
+            // match the settings sheet's instrument styling.
+            Row(
                 modifier = Modifier
-                    .padding(horizontal = 6.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (isSelected) Color.White.copy(alpha = 0.18f) else Color.Transparent)
-                    .clickable { onSelect(source) }
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    ) { onSelect(source) }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (isSelected) {
+                    Text("[", style = Hud.Label, color = Hud.TextFaint)
+                    Spacer(Modifier.width(5.dp))
+                }
                 Text(
                     text = label,
-                    color = if (isSelected) Color.Yellow else Color.White.copy(alpha = 0.75f),
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    style = Hud.Label,
+                    color = if (isSelected) Hud.Accent else Hud.TextFaint,
                 )
+                if (isSelected) {
+                    Spacer(Modifier.width(5.dp))
+                    Text("]", style = Hud.Label, color = Hud.TextFaint)
+                }
             }
         }
     }

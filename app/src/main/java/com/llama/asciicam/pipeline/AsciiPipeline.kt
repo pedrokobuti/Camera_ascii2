@@ -105,7 +105,12 @@ object AsciiPipeline {
      * adjust + Sobel + char selection + block merge, all on the JVM) miss its frame
      * budget badly enough to crash on real devices. The Columns slider is capped
      * to the same value, but this is the actual safety net. */
-    const val MAX_COLS = 180
+    const val MAX_COLS = 120
+
+    /** [applyBlockMerge] merge-group sentinels. Real keys are character codes,
+     * which are never negative, so these can't collide with one. */
+    private const val KEY_UNMERGEABLE = -1
+    private const val KEY_WORD_LETTER = -2
 
     /**
      * [viewportWidthPx] is the live on-screen viewfinder width. Font size is no
@@ -114,17 +119,32 @@ object AsciiPipeline {
      * only density/zoom control (more columns = smaller characters covering
      * the same screen width, not a smaller image).
      */
-    fun computeGridGeometry(settings: AsciiSettings, sourceWidth: Int, sourceHeight: Int, charAspect: Float, viewportWidthPx: Float): GridGeometry {
+    fun computeGridGeometry(
+        settings: AsciiSettings,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        charAspect: Float,
+        viewportWidthPx: Float,
+        fontSizeScale: Float = 1f,
+    ): GridGeometry {
         val cols = settings.cols.coerceIn(1, MAX_COLS)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
         val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
         val baseCellW = cellW / charSpacingFactor
-        val fontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
-        val rowPitch = (fontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
+        // The size the *grid* is laid out from. Deliberately left un-scaled, so
+        // row pitch and row count depend only on the grid settings and the
+        // font's advance width — switching fonts restyles the art rather than
+        // relaying it out.
+        val layoutFontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
+        val rowPitch = (layoutFontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
         val srcAspect = if (sourceWidth > 0) sourceHeight.toFloat() / sourceWidth.toFloat() else 0.75f
         val rows = max(1, round(cols * srcAspect * (baseCellW / rowPitch)).toInt())
-        return GridGeometry(cols, rows, cellW, rowPitch, fontSizePx)
+        // The size glyphs are actually drawn at: shrunk for faces whose ink
+        // fills more of its advance than the default font's, so every font sits
+        // inside its cell the same way. See GlyphMetrics.fontSizeScaleFor.
+        val drawFontSizePx = (layoutFontSizePx * fontSizeScale).coerceAtLeast(0.5f)
+        return GridGeometry(cols, rows, cellW, rowPitch, drawFontSizePx)
     }
 
     fun process(
@@ -559,6 +579,30 @@ object AsciiPipeline {
         val colors = result.colors
         val span = result.span
 
+        // What counts as "the same" for merging purposes.
+        //
+        // Comparing the literal character works for RAMP, where identical
+        // characters mean identical brightness buckets. It silently never fires
+        // in WORD mode though: letter cells are filled by walking through the
+        // word (word[wordIdx++ % length]), so two neighbours are only ever the
+        // same character by coincidence, and "merge uniform blocks" appeared to
+        // do nothing at all.
+        //
+        // What actually makes a region uniform in WORD mode is that all of its
+        // cells are *letter* cells — the word painting a flat area. Those all
+        // share LETTER_KEY, so such a region merges and draws the origin's
+        // letter at block size, which is the intended effect. Fill and edge
+        // cells keep comparing by character exactly as before, so RAMP
+        // behaviour is byte-for-byte unchanged.
+        val wordMode = settings.charSource == CharSource.WORD
+        val isLetterCell = state.wordIsLetterCell
+        fun mergeKeyAt(idx: Int): Int {
+            val c = chars[idx]
+            if (c == ' ') return KEY_UNMERGEABLE
+            if (wordMode && !isEdge[idx] && idx < isLetterCell.size && isLetterCell[idx]) return KEY_WORD_LETTER
+            return c.code
+        }
+
         fun tryMerge(blockSize: Int) {
             var y = 0
             while (y + blockSize <= rows) {
@@ -566,13 +610,13 @@ object AsciiPipeline {
                 while (x + blockSize <= cols) {
                     val originIdx = y * cols + x
                     if (!claimed[originIdx]) {
-                        val ch = chars[originIdx]
-                        var uniform = ch != ' '
+                        val key = mergeKeyAt(originIdx)
+                        var uniform = key != KEY_UNMERGEABLE
                         if (uniform) {
                             outer@ for (dy in 0 until blockSize) {
                                 for (dx in 0 until blockSize) {
                                     val idx = (y + dy) * cols + (x + dx)
-                                    if (claimed[idx] || chars[idx] != ch) { uniform = false; break@outer }
+                                    if (claimed[idx] || mergeKeyAt(idx) != key) { uniform = false; break@outer }
                                 }
                             }
                         }

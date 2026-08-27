@@ -18,10 +18,24 @@ enum class MediaSource { CAMERA, IMAGE, NOISE }
 /** Procedural noise algorithms, ported from `generateNoiseValue()`. */
 enum class NoiseType { WHITE, PERLIN, SIMPLEX, SPARSE, ALLIGATOR, CELLULAR, PLASMA, TURBULENCE }
 
-enum class FontChoice(val displayName: String) {
+/**
+ * [systemFamily] is the Android font-family name passed to `Typeface.create`;
+ * null means the bundled font resource instead. Families that a given device
+ * doesn't ship fall back to its default sans, which is harmless — the glyphs
+ * are still drawn, just not in the requested face.
+ */
+enum class FontChoice(val displayName: String, val systemFamily: String? = null) {
     MODERN_DOS("Modern DOS 8x8"),
-    MONOSPACE("Monospace"),
-    SERIF_MONO("Serif Monospace"),
+    MONOSPACE("Monospace", "monospace"),
+    SERIF_MONO("Serif Monospace", "serif-monospace"),
+    SANS("Sans", "sans-serif"),
+    SANS_CONDENSED("Sans Condensed", "sans-serif-condensed"),
+    SANS_BLACK("Sans Black", "sans-serif-black"),
+    SANS_THIN("Sans Thin", "sans-serif-thin"),
+    SMALL_CAPS("Small Caps", "sans-serif-smallcaps"),
+    SERIF("Serif", "serif"),
+    CASUAL("Casual", "casual"),
+    CURSIVE("Cursive", "cursive"),
 }
 
 /**
@@ -112,6 +126,6 @@ data class AsciiSettings(
         // the per-frame CPU pipeline (color adjust + Sobel + char selection +
         // block merge, all on the JVM, no SIMD) comfortably inside a frame
         // budget on mid-range phones. Users can still raise it via the slider.
-        const val CAMERA_DEFAULT_COLS = 40
+        const val CAMERA_DEFAULT_COLS = 36
     }
 }
