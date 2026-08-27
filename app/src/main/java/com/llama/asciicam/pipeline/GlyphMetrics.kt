@@ -41,8 +41,27 @@ object GlyphMetrics {
         } else {
             // Typeface.create maintains its own internal cache, and falls back
             // to the device default for a family it doesn't have.
-            font.systemFamily?.let { Typeface.create(it, Typeface.NORMAL) } ?: Typeface.MONOSPACE
+            font.systemFamily?.let { Typeface.create(it, font.systemStyle) } ?: Typeface.MONOSPACE
         }
+
+    /**
+     * The character aspect the *grid* is laid out from — always Modern DOS's,
+     * whatever font is selected.
+     *
+     * The grid used to be solved from the current font's own advance ratio,
+     * which meant switching font silently changed row pitch and row count.
+     * Pinning it to one reference keeps column and row spacing identical
+     * across fonts (so changing font restyles the art without relaying it out)
+     * and, since the reference *is* the default font, leaves Modern DOS's
+     * geometry exactly as it was.
+     */
+    fun referenceCharAspect(context: Context): Float {
+        cachedReferenceAspect?.let { return it }
+        return measureCharAspect(typefaceFor(context, FontChoice.MODERN_DOS))
+            .also { cachedReferenceAspect = it }
+    }
+
+    @Volatile private var cachedReferenceAspect: Float? = null
 
     /**
      * Multiplier for the drawn text size that makes [font]'s glyphs occupy the
@@ -62,11 +81,24 @@ object GlyphMetrics {
      */
     fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
         cachedScales[font]?.let { return it }
-        val reference = inkHeightRatio(typefaceFor(context, FontChoice.MODERN_DOS))
-        val own = inkHeightRatio(typefaceFor(context, font))
-        // Clamped: a pathological or missing face shouldn't be able to shrink
-        // the art to nothing or blow it up past its cell.
-        val scale = if (own <= 0.01f) 1f else (reference / own).coerceIn(0.35f, 1.5f)
+        val referenceFace = typefaceFor(context, FontChoice.MODERN_DOS)
+        val ownFace = typefaceFor(context, font)
+
+        // Two independent ways a face can overrun the cell the grid gave it,
+        // measured against the reference font in both: a wider advance spills
+        // sideways into the next column, taller ink spills into the next row.
+        // The tighter of the two wins, so whichever way this face is the
+        // bigger one, it gets pulled back to the reference's footprint.
+        val aspectRef = measureCharAspect(referenceFace)
+        val aspectOwn = measureCharAspect(ownFace)
+        val inkRef = inkHeightRatio(referenceFace)
+        val inkOwn = inkHeightRatio(ownFace)
+
+        val byAdvance = if (aspectOwn <= 0.01f) 1f else aspectRef / aspectOwn
+        val byInk = if (inkOwn <= 0.01f) 1f else inkRef / inkOwn
+        // Never scales *up*: a face daintier than the reference is left alone
+        // rather than inflated past the cell the grid laid out.
+        val scale = minOf(byAdvance, byInk).coerceIn(0.35f, 1f)
         cachedScales[font] = scale
         return scale
     }

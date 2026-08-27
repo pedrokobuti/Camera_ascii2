@@ -57,7 +57,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     private var cachedRampKey: String? = null
     private var cachedSortedRamp: String = ""
     private var cachedAspectFont = settings.font
-    private var cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(getApplication<Application>(), settings.font))
+    private var cachedCharAspect = GlyphMetrics.referenceCharAspect(getApplication<Application>())
     private var cachedFontSizeScale = GlyphMetrics.fontSizeScaleFor(getApplication<Application>(), settings.font)
 
     private var noiseJob: Job? = null
@@ -124,9 +124,96 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
      * the sensor frame to this so the camera grid fills the whole screen. */
     fun currentViewportAspect(): Float = viewportH.toFloat() / viewportW.coerceAtLeast(1)
 
+    // ---- undo / redo ----
+    //
+    // History holds whole AsciiSettings snapshots. The type is a small
+    // immutable data class, so a snapshot is a cheap reference copy and there
+    // is no need to model individual edits.
+
+    private val undoStack = ArrayDeque<AsciiSettings>()
+    private val redoStack = ArrayDeque<AsciiSettings>()
+    // Nullable rather than a 0 sentinel: System.nanoTime()'s origin is
+    // arbitrary and may be negative, so "now - 0" is not reliably a large
+    // positive number and the very first edit could fail to be recorded.
+    private var lastHistoryPushNanos: Long? = null
+
+    var canUndo by mutableStateOf(false)
+        private set
+    var canRedo by mutableStateOf(false)
+        private set
+
+    private fun syncHistoryFlags() {
+        canUndo = undoStack.isNotEmpty()
+        canRedo = redoStack.isNotEmpty()
+    }
+
     fun updateSettings(transform: (AsciiSettings) -> AsciiSettings) {
         val old = settings
         val new = transform(old)
+        if (new == old) return
+
+        // Coalesce: dragging a slider fires this every few milliseconds, and
+        // pushing each tick would make one drag cost dozens of undo steps. Only
+        // the first change of a burst is recorded, which is exactly the state
+        // to return to — the pre-drag value. A pause longer than the window
+        // starts a new undo entry.
+        val now = System.nanoTime()
+        val last = lastHistoryPushNanos
+        if (last == null || now - last > HISTORY_COALESCE_NANOS) {
+            undoStack.addLast(old)
+            if (undoStack.size > MAX_HISTORY) undoStack.removeFirst()
+            redoStack.clear()
+        }
+        lastHistoryPushNanos = now
+
+        applySettings(old, new)
+        syncHistoryFlags()
+    }
+
+    /** Restores the previous settings snapshot. */
+    fun undo() {
+        val previous = undoStack.removeLastOrNull() ?: return
+        redoStack.addLast(settings)
+        // Reset the coalescing clock so the next edit always starts a fresh
+        // history entry rather than being folded into the undone burst.
+        lastHistoryPushNanos = null
+        applySettings(settings, previous)
+        syncHistoryFlags()
+    }
+
+    /** Re-applies the most recently undone snapshot. */
+    fun redo() {
+        val next = redoStack.removeLastOrNull() ?: return
+        undoStack.addLast(settings)
+        lastHistoryPushNanos = null
+        applySettings(settings, next)
+        syncHistoryFlags()
+    }
+
+    /**
+     * Returns every setting to its default, keeping the current media source —
+     * resetting the source too would yank the user out of whatever they're
+     * looking at, which reads as a bug rather than a reset.
+     */
+    fun resetToDefaults() {
+        val old = settings
+        val defaults = AsciiSettings(
+            cols = AsciiSettings.CAMERA_DEFAULT_COLS,
+            mediaSource = old.mediaSource,
+        )
+        if (defaults == old) return
+        undoStack.addLast(old)
+        if (undoStack.size > MAX_HISTORY) undoStack.removeFirst()
+        redoStack.clear()
+        lastHistoryPushNanos = null
+        applySettings(old, defaults)
+        syncHistoryFlags()
+    }
+
+    /** The settings write plus every side effect a change implies. Shared by
+     * [updateSettings], [undo], [redo] and [resetToDefaults] so a restored
+     * snapshot re-runs exactly the same work as a fresh edit. */
+    private fun applySettings(old: AsciiSettings, new: AsciiSettings) {
         settings = new
         // Grid-affecting fields (cols/fontSize/spacing/font) don't need special
         // handling here — PipelineState.ensureSize() detects the resize itself
@@ -177,7 +264,10 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     private fun refreshFontMetricsIfNeeded() {
         if (cachedAspectFont == settings.font) return
         val app = getApplication<Application>()
-        cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(app, settings.font))
+        // Grid aspect is the reference font's, not this font's — see
+        // GlyphMetrics.referenceCharAspect for why the layout is deliberately
+        // font-independent.
+        cachedCharAspect = GlyphMetrics.referenceCharAspect(app)
         cachedFontSizeScale = GlyphMetrics.fontSizeScaleFor(app, settings.font)
         cachedAspectFont = settings.font
     }
@@ -444,6 +534,12 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
          * "nothing changed at all" are indistinguishable from a stale APK
          * otherwise, and that ambiguity has cost more than the fixes have.
          */
-        const val RECORDING_BUILD_MARKER = "build-12"
+        const val RECORDING_BUILD_MARKER = "build-13"
+
+        /** Edits closer together than this fold into one undo entry — see
+         * [updateSettings]. Long enough to swallow a slider drag's stream of
+         * updates, short enough that two deliberate edits stay separate. */
+        private const val HISTORY_COALESCE_NANOS = 500_000_000L
+        private const val MAX_HISTORY = 60
     }
 }

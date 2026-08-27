@@ -27,10 +27,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import com.llama.asciicam.pipeline.AsciiPipeline
 import com.llama.asciicam.pipeline.AsciiSettings
@@ -61,6 +66,11 @@ fun SettingsPanel(
     onExportPng: () -> Unit,
     onExportTxt: () -> Unit,
     onClose: () -> Unit,
+    canUndo: Boolean = false,
+    canRedo: Boolean = false,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    onReset: () -> Unit = {},
 ) {
     fun set(transform: (AsciiSettings) -> AsciiSettings) = onSettingsChange(transform)
 
@@ -72,6 +82,15 @@ fun SettingsPanel(
         contentPadding = PaddingValues(bottom = 40.dp),
     ) {
         item { PanelMasthead(settings, onClose) }
+        item {
+            HistoryBar(
+                canUndo = canUndo,
+                canRedo = canRedo,
+                onUndo = onUndo,
+                onRedo = onRedo,
+                onReset = onReset,
+            )
+        }
 
         // ---- 01 source ----
         item { HudSectionHeader(1, "Source") }
@@ -315,6 +334,69 @@ private fun PanelMasthead(settings: AsciiSettings, onClose: () -> Unit) {
         Canvas(Modifier.fillMaxWidth().height(1.dp)) {
             drawLine(Hud.Line, Offset(0f, 0f), Offset(size.width, 0f), strokeWidth = 1f)
         }
+    }
+}
+
+/**
+ * Undo / redo / reset row, directly under the masthead.
+ *
+ * Undo and redo disable themselves when their stack is empty rather than
+ * disappearing, so the row's layout doesn't shift as history changes.
+ */
+@Composable
+private fun HistoryBar(
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+    onReset: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HudIconAction(
+            icon = Icons.AutoMirrored.Filled.Undo,
+            contentDescription = "Undo",
+            enabled = canUndo,
+            onClick = onUndo,
+        )
+        HudIconAction(
+            icon = Icons.AutoMirrored.Filled.Redo,
+            contentDescription = "Redo",
+            enabled = canRedo,
+            onClick = onRedo,
+        )
+        Box(Modifier.weight(1f)) {
+            HudButton("Reset to defaults", onClick = onReset)
+        }
+    }
+}
+
+/** Square outlined icon button matching [HudButton]'s silhouette. */
+@Composable
+private fun HudIconAction(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = remember { NotchedShape(7.dp) }
+    val tint = if (enabled) Hud.TextPrimary else Hud.TextFaint
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .border(1.dp, if (enabled) Hud.Line else Hud.LineDim, shape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 

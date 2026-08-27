@@ -19,23 +19,33 @@ enum class MediaSource { CAMERA, IMAGE, NOISE }
 enum class NoiseType { WHITE, PERLIN, SIMPLEX, SPARSE, ALLIGATOR, CELLULAR, PLASMA, TURBULENCE }
 
 /**
- * [systemFamily] is the Android font-family name passed to `Typeface.create`;
- * null means the bundled font resource instead. Families that a given device
- * doesn't ship fall back to its default sans, which is harmless — the glyphs
- * are still drawn, just not in the requested face.
+ * Available typefaces — **monospaced only, deliberately**.
+ *
+ * ASCII art relies on every cell being the same width: the grid places each
+ * glyph at a fixed column pitch, so a proportional face leaves ragged gaps
+ * around narrow letters and crowds wide ones, and the image stops reading as
+ * a grid at all. Proportional system families (sans, serif, casual, cursive)
+ * were briefly offered here and looked wrong for exactly that reason.
+ *
+ * Variety instead comes from style variants of the two monospaced families
+ * Android guarantees, which stay fixed-pitch while changing weight and slant.
+ *
+ * [systemFamily] is the family name passed to `Typeface.create`; null means
+ * the bundled font resource instead.
  */
-enum class FontChoice(val displayName: String, val systemFamily: String? = null) {
+enum class FontChoice(
+    val displayName: String,
+    val systemFamily: String? = null,
+    val systemStyle: Int = 0, // Typeface.NORMAL
+) {
     MODERN_DOS("Modern DOS 8x8"),
-    MONOSPACE("Monospace", "monospace"),
-    SERIF_MONO("Serif Monospace", "serif-monospace"),
-    SANS("Sans", "sans-serif"),
-    SANS_CONDENSED("Sans Condensed", "sans-serif-condensed"),
-    SANS_BLACK("Sans Black", "sans-serif-black"),
-    SANS_THIN("Sans Thin", "sans-serif-thin"),
-    SMALL_CAPS("Small Caps", "sans-serif-smallcaps"),
-    SERIF("Serif", "serif"),
-    CASUAL("Casual", "casual"),
-    CURSIVE("Cursive", "cursive"),
+    MONOSPACE("Mono", "monospace"),
+    MONOSPACE_BOLD("Mono Bold", "monospace", 1), // Typeface.BOLD
+    MONOSPACE_ITALIC("Mono Italic", "monospace", 2), // Typeface.ITALIC
+    MONOSPACE_BOLD_ITALIC("Mono Bold Italic", "monospace", 3), // Typeface.BOLD_ITALIC
+    SERIF_MONO("Serif Mono", "serif-monospace"),
+    SERIF_MONO_BOLD("Serif Mono Bold", "serif-monospace", 1),
+    SERIF_MONO_ITALIC("Serif Mono Italic", "serif-monospace", 2),
 }
 
 /**
@@ -78,7 +88,7 @@ data class AsciiSettings(
     // Character source
     val charSource: CharSource = CharSource.RAMP,
     val rampString: String = " .:-=+*#%@░▒▓",
-    val wordString: String = "#LLAMA",
+    val wordString: String = "#1MPO$",
     val fillChars: String = ".+$",
     val stableWord: Boolean = false,
     val wordHoldTimeSeconds: Float = 1.0f, // range 0.2..5.0

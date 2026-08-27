@@ -363,15 +363,47 @@ fun HudToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     ) {
         Text(label.uppercase(Locale.US), style = Hud.Label, color = Hud.TextDim)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Canvas(Modifier.size(8.dp)) {
-                if (checked) drawRect(Hud.Accent) else drawRect(Hud.LineDim, style = Stroke(width = 1.2f))
-            }
-            Spacer(Modifier.width(8.dp))
+            HudCheckbox(checked)
+            Spacer(Modifier.width(9.dp))
             Text(
                 if (checked) "ON" else "OFF",
                 style = Hud.Readout,
                 color = if (checked) Hud.Accent else Hud.TextFaint,
             )
+        }
+    }
+}
+
+/**
+ * Square check control: an outlined box that fills and takes a drawn tick when
+ * on. Paired with the ON/OFF readout so state is legible two ways — the mark
+ * carries it at a glance, the word removes any doubt.
+ */
+@Composable
+fun HudCheckbox(checked: Boolean) {
+    Canvas(Modifier.size(14.dp)) {
+        val inset = 1f
+        val box = Size(size.width - inset * 2, size.height - inset * 2)
+        if (checked) {
+            drawRect(Hud.Accent, topLeft = Offset(inset, inset), size = box)
+            // Tick drawn in the negative space of the filled box.
+            val w = size.width
+            val h = size.height
+            val stroke = w * 0.13f
+            drawLine(
+                color = Color.Black,
+                start = Offset(w * 0.24f, h * 0.52f),
+                end = Offset(w * 0.43f, h * 0.72f),
+                strokeWidth = stroke,
+            )
+            drawLine(
+                color = Color.Black,
+                start = Offset(w * 0.43f, h * 0.72f),
+                end = Offset(w * 0.77f, h * 0.29f),
+                strokeWidth = stroke,
+            )
+        } else {
+            drawRect(Hud.Line, topLeft = Offset(inset, inset), size = box, style = Stroke(width = 1.3f))
         }
     }
 }

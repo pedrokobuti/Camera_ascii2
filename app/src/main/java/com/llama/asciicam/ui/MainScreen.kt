@@ -200,8 +200,25 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ChromeIconButton(icon = Icons.Default.Settings, contentDescription = "Settings") {
-                        showSettings = true
+                    // Gear + wordmark as one target, so the label is part of the
+                    // control rather than decoration sitting next to it.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            ) { showSettings = true }
+                            .padding(start = 12.dp, end = 14.dp, top = 10.dp, bottom = 10.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Menu",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text("MENU", style = Hud.Label, color = Color.White)
                     }
                     if (isRecording) {
                         Row(
@@ -224,11 +241,12 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                             )
                         }
                     }
-                    if (settings.mediaSource == MediaSource.CAMERA) {
-                        ChromeIconButton(icon = Icons.Default.FlipCameraAndroid, contentDescription = "Switch camera") {
-                            viewModel.updateSettings { it.copy(useFrontCamera = !it.useFrontCamera) }
-                        }
-                    }
+                    // No camera-flip control here: the bottom bar's right slot
+                    // already carries one in camera mode, and two buttons doing
+                    // the same thing on one screen is just noise. The spacer
+                    // holds the right end of the SpaceBetween row so the REC
+                    // badge stays where it was rather than sliding over.
+                    Spacer(Modifier.width(48.dp))
                 }
             }
 
@@ -376,6 +394,11 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                             }
                         },
                         onClose = { showSettings = false },
+                        canUndo = viewModel.canUndo,
+                        canRedo = viewModel.canRedo,
+                        onUndo = { viewModel.undo() },
+                        onRedo = { viewModel.redo() },
+                        onReset = { viewModel.resetToDefaults() },
                         )
                     }
                 }
