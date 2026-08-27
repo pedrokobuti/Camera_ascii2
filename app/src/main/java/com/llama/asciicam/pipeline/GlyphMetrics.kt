@@ -85,8 +85,9 @@ object GlyphMetrics {
     }
 
     /**
-     * Multiplier for the drawn text size that keeps [font]'s ink inside the row
-     * [AsciiPipeline.computeGridGeometry] already reserved for it.
+     * Extra height multiplier for [GridGeometry.rowPitch] that keeps [font]'s
+     * ink from crowding into the row above/below, without touching the size
+     * the glyph is actually drawn at.
      *
      * Grid layout solves font size purely from advance width (see
      * [measureCharAspect] / [AsciiPipeline.computeGridGeometry]), so a font
@@ -95,18 +96,23 @@ object GlyphMetrics {
      * too, that larger size also makes its cap-height/stems taller in absolute
      * pixels. Android's built-in "monospace" is markedly narrower than
      * "serif-monospace", so it needs markedly more size-inflation to fill a
-     * column, and ends up with markedly taller ink for it. Comparing measured
-     * ink height against the reference (Modern DOS) at each font's own solved
-     * size catches exactly that, whatever the underlying cause, and pulls the
-     * *drawn* glyph back down to size — [AsciiPipeline.computeGridGeometry]
-     * applies this only to the drawn size, never to [GridGeometry.rowPitch] or
-     * row count, so the row this font earned by being narrower stays put; only
-     * how much of it the glyph actually fills changes. Returns exactly 1.0 for
-     * Modern DOS, so the default look is untouched.
+     * column, and ends up with markedly taller ink for it.
+     *
+     * The fix has to land on the *row*, not the glyph: an earlier version of
+     * this function scaled the drawn text size down instead, but
+     * [android.graphics.Paint.textSize] is one isotropic scalar — shrinking it
+     * to fix the height shrinks the width by the same factor, undoing the
+     * exact column-width fill and opening a gap between columns. Comparing
+     * measured ink height against the reference (Modern DOS) at each font's
+     * own solved size catches the same inflation either way; this returns it
+     * as extra row height instead of a glyph shrink, so the glyph keeps
+     * filling its column at full, undiminished size and only the row count
+     * changes (fewer, taller rows) to make room. Always >= 1 (never shrinks a
+     * row) and exactly 1 for Modern DOS, so its geometry is unaffected.
      */
-    fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
+    fun rowPitchScaleFor(context: Context, font: FontChoice): Float {
         if (font == FontChoice.MODERN_DOS) return 1f
-        cachedScales[font]?.let { return it }
+        cachedRowPitchScales[font]?.let { return it }
         // Each face's own solved size at a shared PROBE_SIZE-wide column,
         // mirroring AsciiPipeline.computeGridGeometry's
         // fontSize = baseCellW / charAspect (with baseCellW == PROBE_SIZE
@@ -116,14 +122,16 @@ object GlyphMetrics {
         val ownFace = typefaceFor(context, font)
         val inkRef = inkHeightRatio(referenceFace, solvedSize(referenceFace))
         val inkOwn = inkHeightRatio(ownFace, solvedSize(ownFace))
-        // Never scales *up*: a face whose ink is already shorter than the
-        // reference's at its own solved size is left alone.
-        val scale = (if (inkOwn <= 0.01f) 1f else inkRef / inkOwn).coerceIn(0.35f, 1f)
-        cachedScales[font] = scale
+        // Never shrinks: a face whose ink is already shorter than the
+        // reference's at its own solved size gets no extra row height.
+        // Upper-clamped so a pathological face can't blow the grid down to
+        // one giant row.
+        val scale = (if (inkRef <= 0.01f) 1f else inkOwn / inkRef).coerceIn(1f, 2.5f)
+        cachedRowPitchScales[font] = scale
         return scale
     }
 
-    private val cachedScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
+    private val cachedRowPitchScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
 
     /**
      * Height of the inked pixels of a representative dense glyph set at

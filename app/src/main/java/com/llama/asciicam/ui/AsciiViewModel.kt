@@ -58,7 +58,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     private var cachedSortedRamp: String = ""
     private var cachedAspectFont = settings.font
     private var cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(getApplication<Application>(), settings.font))
-    private var cachedFontSizeScale = GlyphMetrics.fontSizeScaleFor(getApplication<Application>(), settings.font)
+    private var cachedRowPitchScale = GlyphMetrics.rowPitchScaleFor(getApplication<Application>(), settings.font)
 
     private var noiseJob: Job? = null
     private var noiseClock = 0f
@@ -259,19 +259,19 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         return cachedCharAspect
     }
 
-    /** Per-font vertical size trim so a font whose ink runs taller than the
-     * row its own width-driven size earned doesn't crowd its neighbors — see
-     * [GlyphMetrics.fontSizeScaleFor]. */
-    private fun ensureFontSizeScale(): Float {
+    /** Per-font extra row height so a font whose ink runs taller than the
+     * reference's doesn't crowd its neighboring rows — see
+     * [GlyphMetrics.rowPitchScaleFor]. Never shrinks the glyph itself. */
+    private fun ensureRowPitchScale(): Float {
         refreshFontMetricsIfNeeded()
-        return cachedFontSizeScale
+        return cachedRowPitchScale
     }
 
     private fun refreshFontMetricsIfNeeded() {
         if (cachedAspectFont == settings.font) return
         val app = getApplication<Application>()
         cachedCharAspect = GlyphMetrics.measureCharAspect(GlyphMetrics.typefaceFor(app, settings.font))
-        cachedFontSizeScale = GlyphMetrics.fontSizeScaleFor(app, settings.font)
+        cachedRowPitchScale = GlyphMetrics.rowPitchScaleFor(app, settings.font)
         cachedAspectFont = settings.font
     }
 
@@ -297,7 +297,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
 
         val s = settings
         val charAspect = ensureCharAspect()
-        val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat(), ensureFontSizeScale())
+        val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat(), ensureRowPitchScale())
         // The caller already downsampled to (cols, rows) from the *previous* geometry
         // request; if geometry's row count differs (e.g. right after a cols change),
         // this frame's row count won't line up. Re-derive using the actually-supplied
@@ -323,7 +323,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     fun currentGridCols(): Int = settings.cols.coerceIn(1, AsciiPipeline.MAX_COLS)
     fun currentGridRows(): Int {
         val charAspect = ensureCharAspect()
-        return AsciiPipeline.computeGridGeometry(settings, lastSrcW, lastSrcH, charAspect, viewportW.toFloat(), ensureFontSizeScale()).rows
+        return AsciiPipeline.computeGridGeometry(settings, lastSrcW, lastSrcH, charAspect, viewportW.toFloat(), ensureRowPitchScale()).rows
     }
 
     private fun manageNoiseLoop() {
@@ -342,7 +342,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
                 val charAspect = ensureCharAspect()
                 val srcW = viewportW
                 val srcH = viewportH
-                val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat(), ensureFontSizeScale())
+                val geom = AsciiPipeline.computeGridGeometry(s, srcW, srcH, charAspect, viewportW.toFloat(), ensureRowPitchScale())
                 val n = geom.cols * geom.rows
                 val rr = FloatArray(n); val gg = FloatArray(n); val bb = FloatArray(n)
                 GridSources.sampleNoise(s.noiseType, geom.cols, geom.rows, noiseClock, s.noiseScale, rr, gg, bb)
@@ -360,7 +360,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.Default) {
             val s = settings
             val charAspect = ensureCharAspect()
-            val geom = AsciiPipeline.computeGridGeometry(s, bmp.width, bmp.height, charAspect, viewportW.toFloat(), ensureFontSizeScale())
+            val geom = AsciiPipeline.computeGridGeometry(s, bmp.width, bmp.height, charAspect, viewportW.toFloat(), ensureRowPitchScale())
             val n = geom.cols * geom.rows
             val rr = FloatArray(n); val gg = FloatArray(n); val bb = FloatArray(n)
             GridSources.sampleBitmap(bmp, geom.cols, geom.rows, rr, gg, bb)

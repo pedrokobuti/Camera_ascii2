@@ -131,15 +131,21 @@ object AsciiPipeline {
      * cell on its own terms instead of being squeezed or stretched into a
      * cell shaped for a different font.
      *
-     * [fontSizeScale] (see [GlyphMetrics.fontSizeScaleFor]) trims *only* the
-     * size glyphs are actually drawn at, after all of the above — [rowPitch]
-     * and [rows] stay driven by the full, unscaled size. A font whose ink
+     * [rowPitchScale] (see [GlyphMetrics.rowPitchScaleFor]) gives [rowPitch]
+     * *extra* height, on top of [lineSpacingPercent]'s, for a font whose ink
      * (cap height, stems) reaches proportionally higher above its own
-     * baseline than the reference font's, at the same advance-filling size,
-     * would otherwise visually crowd into the row above/below even though its
-     * *advance width* fit its column exactly; this pulls the glyph back
-     * inside the row [rowPitch] already reserved for it, rather than fighting
-     * over how many rows there are.
+     * baseline than the reference font's at the same advance-filling size —
+     * without it, such a font would visually crowd into the row above/below
+     * even though its *advance width* fits its column exactly. This is
+     * deliberately a row-height change, not a glyph-size change: shrinking the
+     * glyph instead (an earlier version of this function did) shrinks its
+     * *width* by the same factor via [android.graphics.Paint.textSize] being
+     * one isotropic scalar — undoing the exact column-width fill above and
+     * opening a gap between columns. Taller rows instead means [rows] drops
+     * for a tall-ink font (fewer, taller rows fit the same source image), and
+     * the glyph itself is always drawn at the full, undiminished
+     * width-driven size. Always >= 1 — never used to *shrink* row height —
+     * and exactly 1 for Modern DOS, so its geometry is unaffected.
      */
     fun computeGridGeometry(
         settings: AsciiSettings,
@@ -147,19 +153,21 @@ object AsciiPipeline {
         sourceHeight: Int,
         charAspect: Float,
         viewportWidthPx: Float,
-        fontSizeScale: Float = 1f,
+        rowPitchScale: Float = 1f,
     ): GridGeometry {
         val cols = settings.cols.coerceIn(1, MAX_COLS)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
         val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
         val baseCellW = cellW / charSpacingFactor
-        val layoutFontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
-        val rowPitch = (layoutFontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
+        // Always the full width-driven size — never scaled down for drawing,
+        // so the glyph's own natural advance keeps exactly filling baseCellW
+        // regardless of rowPitchScale. See the doc comment above.
+        val fontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
+        val rowPitch = (fontSizePx * lineSpacingFactor * rowPitchScale.coerceAtLeast(1f)).coerceAtLeast(0.5f)
         val srcAspect = if (sourceWidth > 0) sourceHeight.toFloat() / sourceWidth.toFloat() else 0.75f
         val rows = max(1, round(cols * srcAspect * (baseCellW / rowPitch)).toInt())
-        val drawFontSizePx = (layoutFontSizePx * fontSizeScale).coerceAtLeast(0.5f)
-        return GridGeometry(cols, rows, cellW, rowPitch, drawFontSizePx)
+        return GridGeometry(cols, rows, cellW, rowPitch, fontSizePx)
     }
 
     fun process(
