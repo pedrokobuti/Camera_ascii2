@@ -178,8 +178,32 @@ fun SettingsPanel(
             }
         }
 
-        // ---- 04 edges ----
-        item { HudSectionHeader(4, "Edge Detect") }
+        // ---- 04 color mode ----
+        item { HudSectionHeader(4, "Palette") }
+        item {
+            HudPanel {
+                Column {
+                    HudSegmented(
+                        options = listOf("Source" to ColorMode.SOURCE, "Palette" to ColorMode.PALETTE),
+                        selected = settings.colorMode,
+                        onSelect = { v -> set { it.copy(colorMode = v) } },
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    HudSegmented(
+                        options = listOf("1mposter" to ColorMode.IMPOSTER, "Mono" to ColorMode.MONO),
+                        selected = settings.colorMode,
+                        onSelect = { v -> set { it.copy(colorMode = v) } },
+                    )
+                    if (settings.colorMode == ColorMode.PALETTE) {
+                        HudRule()
+                        PaletteEditor(settings.paletteStops) { stops -> set { it.copy(paletteStops = stops) } }
+                    }
+                }
+            }
+        }
+
+        // ---- 05 edges ----
+        item { HudSectionHeader(5, "Edge Detect") }
         item {
             HudPanel {
                 Column {
@@ -212,8 +236,8 @@ fun SettingsPanel(
             }
         }
 
-        // ---- 05 distortion ----
-        item { HudSectionHeader(5, "Distortion") }
+        // ---- 06 distortion ----
+        item { HudSectionHeader(6, "Distortion") }
         item {
             HudPanel {
                 Column {
@@ -232,8 +256,8 @@ fun SettingsPanel(
             }
         }
 
-        // ---- 06 color adjust ----
-        item { HudSectionHeader(6, "Signal") }
+        // ---- 07 color adjust ----
+        item { HudSectionHeader(7, "Input Color Correction") }
         item {
             HudPanel {
                 Column {
@@ -244,30 +268,6 @@ fun SettingsPanel(
                     HudSlider("Gamma", settings.gamma.toFloat(), 20f, 300f, valueLabel = { hudInt(it) }) { v -> set { it.copy(gamma = v.toInt()) } }
                     HudRule()
                     HudToggle("Invert ASCII", settings.invert) { v -> set { it.copy(invert = v) } }
-                }
-            }
-        }
-
-        // ---- 07 color mode ----
-        item { HudSectionHeader(7, "Palette") }
-        item {
-            HudPanel {
-                Column {
-                    HudSegmented(
-                        options = listOf("Source" to ColorMode.SOURCE, "Palette" to ColorMode.PALETTE),
-                        selected = settings.colorMode,
-                        onSelect = { v -> set { it.copy(colorMode = v) } },
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    HudSegmented(
-                        options = listOf("1mposter" to ColorMode.IMPOSTER, "Mono" to ColorMode.MONO),
-                        selected = settings.colorMode,
-                        onSelect = { v -> set { it.copy(colorMode = v) } },
-                    )
-                    if (settings.colorMode == ColorMode.PALETTE) {
-                        HudRule()
-                        PaletteEditor(settings.paletteStops) { stops -> set { it.copy(paletteStops = stops) } }
-                    }
                 }
             }
         }

@@ -65,45 +65,67 @@ object GlyphMetrics {
 
     /**
      * Multiplier for the drawn text size that makes [font]'s glyphs occupy the
-     * same visual area inside a cell as the default Modern DOS font's do.
+     * same *vertical* extent inside a cell as the default Modern DOS font's do.
      *
-     * The grid solves text size from each font's *advance width*, which lines
-     * the columns up but says nothing about how much of that space the glyph
-     * actually inks. Modern DOS is a pixel font whose marks sit well inside
-     * their advance; most system faces have far taller caps and heavier stems,
-     * so at the same advance-derived size they read as much bigger and crowd
-     * their cells. Normalising on measured ink height instead fixes that, and
-     * by construction returns exactly 1.0 for Modern DOS, so the default look
-     * is untouched.
+     * The grid solves text size from the reference font's advance width, which
+     * lines the columns up but says nothing about how much of that space a
+     * glyph inks vertically. Modern DOS is a pixel font whose marks sit well
+     * inside their line height; most system faces have far taller caps and
+     * heavier stems, so at the same size they read as much bigger and crowd
+     * into the row above/below. Normalising on measured ink height fixes that,
+     * and by construction returns exactly 1.0 for Modern DOS, so the default
+     * look is untouched.
      *
-     * Deliberately affects only the drawn size, not [GridGeometry.rowPitch] or
-     * the row count — switching fonts should restyle the art, not relayout it.
+     * Horizontal fit is a separate concern, handled by [textScaleXFor] instead
+     * — deliberately not folded in here, since the two act on different axes
+     * (this shrinks a whole glyph including its width; that stretches width
+     * only). Deliberately affects only the drawn size, not
+     * [GridGeometry.rowPitch] or the row count — switching fonts should
+     * restyle the art, not relayout it.
      */
     fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
         cachedScales[font]?.let { return it }
-        val referenceFace = typefaceFor(context, FontChoice.MODERN_DOS)
-        val ownFace = typefaceFor(context, font)
-
-        // Two independent ways a face can overrun the cell the grid gave it,
-        // measured against the reference font in both: a wider advance spills
-        // sideways into the next column, taller ink spills into the next row.
-        // The tighter of the two wins, so whichever way this face is the
-        // bigger one, it gets pulled back to the reference's footprint.
-        val aspectRef = measureCharAspect(referenceFace)
-        val aspectOwn = measureCharAspect(ownFace)
-        val inkRef = inkHeightRatio(referenceFace)
-        val inkOwn = inkHeightRatio(ownFace)
-
-        val byAdvance = if (aspectOwn <= 0.01f) 1f else aspectRef / aspectOwn
-        val byInk = if (inkOwn <= 0.01f) 1f else inkRef / inkOwn
+        val inkRef = inkHeightRatio(typefaceFor(context, FontChoice.MODERN_DOS))
+        val inkOwn = inkHeightRatio(typefaceFor(context, font))
         // Never scales *up*: a face daintier than the reference is left alone
         // rather than inflated past the cell the grid laid out.
-        val scale = minOf(byAdvance, byInk).coerceIn(0.35f, 1f)
+        val scale = (if (inkOwn <= 0.01f) 1f else inkRef / inkOwn).coerceIn(0.35f, 1f)
         cachedScales[font] = scale
         return scale
     }
 
     private val cachedScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
+
+    /**
+     * Horizontal stretch ([android.graphics.Paint.setTextScaleX]) that makes
+     * [font]'s glyphs advance at the same width-to-height ratio as Modern
+     * DOS's — i.e. makes this font "truly monospace" in the sense this app
+     * needs: cell width and cell height filled the same way regardless of
+     * which font is picked.
+     *
+     * None of Android's built-in monospaced families are naturally square —
+     * "monospace" and "serif-monospace" both advance at roughly 0.55-0.6 of
+     * their line height, well short of Modern DOS's near-1:1 pixel-grid
+     * design, which is what actually produces the "taller than wide" look
+     * when a system font is swapped in. Rather than restrict font choice down
+     * to Modern DOS alone (the only face that happens to already be square),
+     * this corrects the discrepancy directly: the stretch that would put this
+     * font's own advance-to-height ratio at parity with the reference's.
+     * Returns exactly 1.0 (no stretch) for Modern DOS.
+     */
+    fun textScaleXFor(context: Context, font: FontChoice): Float {
+        if (font == FontChoice.MODERN_DOS) return 1f
+        cachedScaleX[font]?.let { return it }
+        val aspectRef = measureCharAspect(typefaceFor(context, FontChoice.MODERN_DOS))
+        val aspectOwn = measureCharAspect(typefaceFor(context, font))
+        // Clamped: a pathological or missing face shouldn't be stretched into
+        // something illegible.
+        val scaleX = (if (aspectOwn <= 0.01f) 1f else aspectRef / aspectOwn).coerceIn(0.4f, 2.5f)
+        cachedScaleX[font] = scaleX
+        return scaleX
+    }
+
+    private val cachedScaleX = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
 
     /**
      * Height of the inked pixels of a representative dense glyph set, relative

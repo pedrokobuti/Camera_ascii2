@@ -93,6 +93,9 @@ object Export {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.typeface = typeface
             textAlign = Paint.Align.CENTER
+            // Corrects width-to-height for fonts that aren't naturally square
+            // like Modern DOS — see GlyphMetrics.textScaleXFor.
+            textScaleX = GlyphMetrics.textScaleXFor(context, font)
         }
         drawFrameInto(canvas, frame, geometry, paint, baselineRatio, outWidth, outHeight, backgroundArgb)
         return bmp

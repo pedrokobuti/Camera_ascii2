@@ -421,6 +421,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
         // and safe to draw with from multiple threads (Paint isn't, and each
         // path already builds its own).
         val typeface = GlyphMetrics.typefaceFor(context, settings.font)
+        val textScaleX = GlyphMetrics.textScaleXFor(context, settings.font)
         val usingFallbackFont = settings.font == com.llama.asciicam.pipeline.FontChoice.MODERN_DOS &&
             typeface === android.graphics.Typeface.MONOSPACE
         viewModelScope.launch(Dispatchers.Default) {
@@ -460,6 +461,7 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
             val recorder = VideoRecorder(
                 context = context,
                 typeface = typeface,
+                textScaleX = textScaleX,
                 backgroundArgb = bgArgb,
                 requestedWidth = targetW,
                 requestedHeight = targetH,
