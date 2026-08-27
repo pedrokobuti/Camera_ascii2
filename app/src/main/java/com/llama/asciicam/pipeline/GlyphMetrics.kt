@@ -24,10 +24,6 @@ object GlyphMetrics {
     private const val PROBE_SIZE = 64f
     private const val DENSITY_BITMAP_SIZE = 32
 
-    /** Dense, full-height characters — the ones that set a font's apparent
-     * weight in ASCII art — used to measure ink extent in [inkHeightRatio]. */
-    private const val INK_PROBE_CHARS = "#@MWX8"
-
     // Cached only on success — a transient load failure must NOT get stuck
     // here, since that would silently poison every future caller (including
     // ones on a different thread, like VideoRecorder's) into the fallback
@@ -43,108 +39,6 @@ object GlyphMetrics {
             // to the device default for a family it doesn't have.
             font.systemFamily?.let { Typeface.create(it, font.systemStyle) } ?: Typeface.MONOSPACE
         }
-
-    /**
-     * The character aspect the *grid* is laid out from — always Modern DOS's,
-     * whatever font is selected.
-     *
-     * The grid used to be solved from the current font's own advance ratio,
-     * which meant switching font silently changed row pitch and row count.
-     * Pinning it to one reference keeps column and row spacing identical
-     * across fonts (so changing font restyles the art without relaying it out)
-     * and, since the reference *is* the default font, leaves Modern DOS's
-     * geometry exactly as it was.
-     */
-    fun referenceCharAspect(context: Context): Float {
-        cachedReferenceAspect?.let { return it }
-        return measureCharAspect(typefaceFor(context, FontChoice.MODERN_DOS))
-            .also { cachedReferenceAspect = it }
-    }
-
-    @Volatile private var cachedReferenceAspect: Float? = null
-
-    /**
-     * Multiplier for the drawn text size that makes [font]'s glyphs occupy the
-     * same *vertical* extent inside a cell as the default Modern DOS font's do.
-     *
-     * The grid solves text size from the reference font's advance width, which
-     * lines the columns up but says nothing about how much of that space a
-     * glyph inks vertically. Modern DOS is a pixel font whose marks sit well
-     * inside their line height; most system faces have far taller caps and
-     * heavier stems, so at the same size they read as much bigger and crowd
-     * into the row above/below. Normalising on measured ink height fixes that,
-     * and by construction returns exactly 1.0 for Modern DOS, so the default
-     * look is untouched.
-     *
-     * Horizontal fit is a separate concern, handled by [textScaleXFor] instead
-     * — deliberately not folded in here, since the two act on different axes
-     * (this shrinks a whole glyph including its width; that stretches width
-     * only). Deliberately affects only the drawn size, not
-     * [GridGeometry.rowPitch] or the row count — switching fonts should
-     * restyle the art, not relayout it.
-     */
-    fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
-        cachedScales[font]?.let { return it }
-        val inkRef = inkHeightRatio(typefaceFor(context, FontChoice.MODERN_DOS))
-        val inkOwn = inkHeightRatio(typefaceFor(context, font))
-        // Never scales *up*: a face daintier than the reference is left alone
-        // rather than inflated past the cell the grid laid out.
-        val scale = (if (inkOwn <= 0.01f) 1f else inkRef / inkOwn).coerceIn(0.35f, 1f)
-        cachedScales[font] = scale
-        return scale
-    }
-
-    private val cachedScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
-
-    /**
-     * Horizontal stretch ([android.graphics.Paint.setTextScaleX]) that makes
-     * [font]'s glyphs advance at the same width-to-height ratio as Modern
-     * DOS's — i.e. makes this font "truly monospace" in the sense this app
-     * needs: cell width and cell height filled the same way regardless of
-     * which font is picked.
-     *
-     * None of Android's built-in monospaced families are naturally square —
-     * "monospace" and "serif-monospace" both advance at roughly 0.55-0.6 of
-     * their line height, well short of Modern DOS's near-1:1 pixel-grid
-     * design, which is what actually produces the "taller than wide" look
-     * when a system font is swapped in. Rather than restrict font choice down
-     * to Modern DOS alone (the only face that happens to already be square),
-     * this corrects the discrepancy directly: the stretch that would put this
-     * font's own advance-to-height ratio at parity with the reference's.
-     * Returns exactly 1.0 (no stretch) for Modern DOS.
-     */
-    fun textScaleXFor(context: Context, font: FontChoice): Float {
-        if (font == FontChoice.MODERN_DOS) return 1f
-        cachedScaleX[font]?.let { return it }
-        val aspectRef = measureCharAspect(typefaceFor(context, FontChoice.MODERN_DOS))
-        val aspectOwn = measureCharAspect(typefaceFor(context, font))
-        // Clamped: a pathological or missing face shouldn't be stretched into
-        // something illegible.
-        val scaleX = (if (aspectOwn <= 0.01f) 1f else aspectRef / aspectOwn).coerceIn(0.4f, 2.5f)
-        cachedScaleX[font] = scaleX
-        return scaleX
-    }
-
-    private val cachedScaleX = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
-
-    /**
-     * Height of the inked pixels of a representative dense glyph set, relative
-     * to text size. Uses the union of a few characters rather than one, since
-     * any single glyph's height is an accident of that font's design.
-     */
-    private fun inkHeightRatio(typeface: Typeface): Float {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.typeface = typeface
-            textSize = PROBE_SIZE
-        }
-        val bounds = android.graphics.Rect()
-        var maxHeight = 0
-        for (ch in INK_PROBE_CHARS) {
-            paint.getTextBounds(ch.toString(), 0, 1, bounds)
-            if (bounds.height() > maxHeight) maxHeight = bounds.height()
-        }
-        return maxHeight / PROBE_SIZE
-    }
 
     // Resources.getFont() is the plain platform API (available since API 26,
     // this app's minSdk) for loading a font resource — used directly instead

@@ -118,6 +118,18 @@ object AsciiPipeline {
      * fills exactly that width for the current `cols`, i.e. `cols` is now the
      * only density/zoom control (more columns = smaller characters covering
      * the same screen width, not a smaller image).
+     *
+     * [charAspect] is the *selected font's own* measured width/height ratio
+     * (see [GlyphMetrics.measureCharAspect]), not a fixed reference — font
+     * size is solved so this font's own natural advance exactly fills the
+     * column width, with no post-hoc scaling or stretching needed to make it
+     * fit. Different fonts have different natural aspects (Modern DOS's is
+     * close to 1:1; most system monospace faces are narrower), which is
+     * exactly why [rows] is computed *after* [rowPitch] and depends on it:
+     * changing font changes how many rows are needed to cover the same source
+     * image, which is the intended effect — every font ends up filling its own
+     * cell on its own terms instead of being squeezed or stretched into a
+     * cell shaped for a different font.
      */
     fun computeGridGeometry(
         settings: AsciiSettings,
@@ -125,26 +137,17 @@ object AsciiPipeline {
         sourceHeight: Int,
         charAspect: Float,
         viewportWidthPx: Float,
-        fontSizeScale: Float = 1f,
     ): GridGeometry {
         val cols = settings.cols.coerceIn(1, MAX_COLS)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
         val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
         val baseCellW = cellW / charSpacingFactor
-        // The size the *grid* is laid out from. Deliberately left un-scaled, so
-        // row pitch and row count depend only on the grid settings and the
-        // font's advance width — switching fonts restyles the art rather than
-        // relaying it out.
-        val layoutFontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
-        val rowPitch = (layoutFontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
+        val fontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
+        val rowPitch = (fontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
         val srcAspect = if (sourceWidth > 0) sourceHeight.toFloat() / sourceWidth.toFloat() else 0.75f
         val rows = max(1, round(cols * srcAspect * (baseCellW / rowPitch)).toInt())
-        // The size glyphs are actually drawn at: shrunk for faces whose ink
-        // fills more of its advance than the default font's, so every font sits
-        // inside its cell the same way. See GlyphMetrics.fontSizeScaleFor.
-        val drawFontSizePx = (layoutFontSizePx * fontSizeScale).coerceAtLeast(0.5f)
-        return GridGeometry(cols, rows, cellW, rowPitch, drawFontSizePx)
+        return GridGeometry(cols, rows, cellW, rowPitch, fontSizePx)
     }
 
     fun process(

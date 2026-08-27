@@ -85,12 +85,6 @@ import java.util.Locale
 class VideoRecorder(
     private val context: Context,
     private val typeface: Typeface,
-    // Horizontal glyph stretch for the selected font — see
-    // GlyphMetrics.textScaleXFor. Passed in rather than a FontChoice because
-    // this class only ever needed the resolved Typeface, and computing this
-    // is cheap enough to do once on the caller's (main) thread alongside the
-    // typeface resolution, keeping this class agnostic of FontChoice entirely.
-    private val textScaleX: Float,
     private val backgroundArgb: Int,
     requestedWidth: Int,
     requestedHeight: Int,
@@ -182,7 +176,6 @@ class VideoRecorder(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).also { p ->
         p.typeface = typeface
         p.textAlign = Paint.Align.CENTER
-        p.textScaleX = textScaleX
     }
 
     /**

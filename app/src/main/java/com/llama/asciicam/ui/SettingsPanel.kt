@@ -179,7 +179,7 @@ fun SettingsPanel(
         }
 
         // ---- 04 color mode ----
-        item { HudSectionHeader(4, "Palette") }
+        item { HudSectionHeader(4, "Color Palette") }
         item {
             HudPanel {
                 Column {
@@ -277,8 +277,8 @@ fun SettingsPanel(
         item {
             HudPanel {
                 Column {
-                    HudToggle("Merge 3×3", settings.merge3x3) { v -> set { it.copy(merge3x3 = v) } }
                     HudToggle("Merge 2×2", settings.merge2x2) { v -> set { it.copy(merge2x2 = v) } }
+                    HudToggle("Merge 3×3", settings.merge3x3) { v -> set { it.copy(merge3x3 = v) } }
                     HudCaption("Flat areas collapse into larger glyphs")
                 }
             }

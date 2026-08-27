@@ -37,13 +37,10 @@ fun AsciiCanvas(
     val context = LocalContext.current
     val typeface = remember(font) { GlyphMetrics.typefaceFor(context, font) }
     val baselineRatio = remember(font) { GlyphMetrics.measureBaselineOffsetRatio(typeface) }
-    val paint = remember(font, typeface) {
+    val paint = remember(typeface) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             this.typeface = typeface
             textAlign = Paint.Align.CENTER
-            // Corrects width-to-height for fonts that aren't naturally square
-            // like Modern DOS — see GlyphMetrics.textScaleXFor.
-            textScaleX = GlyphMetrics.textScaleXFor(context, font)
         }
     }
 
