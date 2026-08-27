@@ -130,6 +130,16 @@ object AsciiPipeline {
      * image, which is the intended effect — every font ends up filling its own
      * cell on its own terms instead of being squeezed or stretched into a
      * cell shaped for a different font.
+     *
+     * [fontSizeScale] (see [GlyphMetrics.fontSizeScaleFor]) trims *only* the
+     * size glyphs are actually drawn at, after all of the above — [rowPitch]
+     * and [rows] stay driven by the full, unscaled size. A font whose ink
+     * (cap height, stems) reaches proportionally higher above its own
+     * baseline than the reference font's, at the same advance-filling size,
+     * would otherwise visually crowd into the row above/below even though its
+     * *advance width* fit its column exactly; this pulls the glyph back
+     * inside the row [rowPitch] already reserved for it, rather than fighting
+     * over how many rows there are.
      */
     fun computeGridGeometry(
         settings: AsciiSettings,
@@ -137,17 +147,19 @@ object AsciiPipeline {
         sourceHeight: Int,
         charAspect: Float,
         viewportWidthPx: Float,
+        fontSizeScale: Float = 1f,
     ): GridGeometry {
         val cols = settings.cols.coerceIn(1, MAX_COLS)
         val lineSpacingFactor = settings.lineSpacingPercent / 100f
         val charSpacingFactor = settings.charSpacingPercent / 100f
         val cellW = (viewportWidthPx / cols).coerceAtLeast(0.5f)
         val baseCellW = cellW / charSpacingFactor
-        val fontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
-        val rowPitch = (fontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
+        val layoutFontSizePx = (baseCellW / charAspect.coerceAtLeast(0.01f)).coerceAtLeast(0.5f)
+        val rowPitch = (layoutFontSizePx * lineSpacingFactor).coerceAtLeast(0.5f)
         val srcAspect = if (sourceWidth > 0) sourceHeight.toFloat() / sourceWidth.toFloat() else 0.75f
         val rows = max(1, round(cols * srcAspect * (baseCellW / rowPitch)).toInt())
-        return GridGeometry(cols, rows, cellW, rowPitch, fontSizePx)
+        val drawFontSizePx = (layoutFontSizePx * fontSizeScale).coerceAtLeast(0.5f)
+        return GridGeometry(cols, rows, cellW, rowPitch, drawFontSizePx)
     }
 
     fun process(

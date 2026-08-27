@@ -24,6 +24,10 @@ object GlyphMetrics {
     private const val PROBE_SIZE = 64f
     private const val DENSITY_BITMAP_SIZE = 32
 
+    /** Dense, full-height characters — the ones that set a font's apparent
+     * weight in ASCII art — used to measure ink extent in [inkHeightRatio]. */
+    private const val INK_PROBE_CHARS = "#@MWX8"
+
     // Cached only on success — a transient load failure must NOT get stuck
     // here, since that would silently poison every future caller (including
     // ones on a different thread, like VideoRecorder's) into the fallback
@@ -78,6 +82,69 @@ object GlyphMetrics {
         }
         val width = paint.measureText("#")
         return (width / PROBE_SIZE).coerceIn(0.2f, 1.2f)
+    }
+
+    /**
+     * Multiplier for the drawn text size that keeps [font]'s ink inside the row
+     * [AsciiPipeline.computeGridGeometry] already reserved for it.
+     *
+     * Grid layout solves font size purely from advance width (see
+     * [measureCharAspect] / [AsciiPipeline.computeGridGeometry]), so a font
+     * with a *narrower* natural advance needs a *larger* size to fill the same
+     * column — and since every other dimension of a font scales with its size
+     * too, that larger size also makes its cap-height/stems taller in absolute
+     * pixels. Android's built-in "monospace" is markedly narrower than
+     * "serif-monospace", so it needs markedly more size-inflation to fill a
+     * column, and ends up with markedly taller ink for it. Comparing measured
+     * ink height against the reference (Modern DOS) at each font's own solved
+     * size catches exactly that, whatever the underlying cause, and pulls the
+     * *drawn* glyph back down to size — [AsciiPipeline.computeGridGeometry]
+     * applies this only to the drawn size, never to [GridGeometry.rowPitch] or
+     * row count, so the row this font earned by being narrower stays put; only
+     * how much of it the glyph actually fills changes. Returns exactly 1.0 for
+     * Modern DOS, so the default look is untouched.
+     */
+    fun fontSizeScaleFor(context: Context, font: FontChoice): Float {
+        if (font == FontChoice.MODERN_DOS) return 1f
+        cachedScales[font]?.let { return it }
+        // Each face's own solved size at a shared PROBE_SIZE-wide column,
+        // mirroring AsciiPipeline.computeGridGeometry's
+        // fontSize = baseCellW / charAspect (with baseCellW == PROBE_SIZE
+        // here) — the size whose ink actually matters, not PROBE_SIZE itself.
+        fun solvedSize(typeface: Typeface) = PROBE_SIZE / measureCharAspect(typeface).coerceAtLeast(0.01f)
+        val referenceFace = typefaceFor(context, FontChoice.MODERN_DOS)
+        val ownFace = typefaceFor(context, font)
+        val inkRef = inkHeightRatio(referenceFace, solvedSize(referenceFace))
+        val inkOwn = inkHeightRatio(ownFace, solvedSize(ownFace))
+        // Never scales *up*: a face whose ink is already shorter than the
+        // reference's at its own solved size is left alone.
+        val scale = (if (inkOwn <= 0.01f) 1f else inkRef / inkOwn).coerceIn(0.35f, 1f)
+        cachedScales[font] = scale
+        return scale
+    }
+
+    private val cachedScales = java.util.concurrent.ConcurrentHashMap<FontChoice, Float>()
+
+    /**
+     * Height of the inked pixels of a representative dense glyph set at
+     * [atSize], relative to [PROBE_SIZE] — i.e. the fraction of a *reference*
+     * text size the glyph's ink occupies, evaluated at whatever size this font
+     * actually gets drawn at. Uses the union of a few characters rather than
+     * one, since any single glyph's height is an accident of that font's
+     * design.
+     */
+    private fun inkHeightRatio(typeface: Typeface, atSize: Float): Float {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.typeface = typeface
+            textSize = atSize
+        }
+        val bounds = android.graphics.Rect()
+        var maxHeight = 0
+        for (ch in INK_PROBE_CHARS) {
+            paint.getTextBounds(ch.toString(), 0, 1, bounds)
+            if (bounds.height() > maxHeight) maxHeight = bounds.height()
+        }
+        return maxHeight / PROBE_SIZE
     }
 
     /**
