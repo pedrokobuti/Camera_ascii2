@@ -55,6 +55,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -151,7 +153,19 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                 backgroundColor = if (settings.invert) Color.White else Color.Black,
                 modifier = Modifier
                     .fillMaxSize()
-                    .onSizeChanged { viewModel.reportViewportSize(it.width, it.height) },
+                    .onSizeChanged { viewModel.reportViewportSize(it.width, it.height) }
+                    // Pinch-to-zoom over the viewfinder, as in the stock camera
+                    // app. Only meaningful while the camera is the source — the
+                    // image and noise sources have no sensor to zoom. Keyed on
+                    // mediaSource so the gesture detector is dropped entirely
+                    // rather than sitting there swallowing pinches for a source
+                    // that can't act on them.
+                    .pointerInput(settings.mediaSource) {
+                        if (settings.mediaSource != MediaSource.CAMERA) return@pointerInput
+                        detectTransformGestures { _, _, gestureZoom, _ ->
+                            viewModel.onPinchZoom(gestureZoom)
+                        }
+                    },
             )
             if (frame == null) {
                 Icon(
@@ -237,8 +251,12 @@ fun MainScreen(viewModel: AsciiViewModel = viewModel()) {
                         tint = if (isRecording) Color.Red else Color.White,
                     ) {
                         if (isRecording) {
-                            viewModel.stopRecording { ok ->
-                                Toast.makeText(context, if (ok) "Saved video to Movies/AsciiCam" else "Recording failed", Toast.LENGTH_SHORT).show()
+                            viewModel.stopRecording { ok, fps ->
+                                Toast.makeText(
+                                    context,
+                                    if (ok) "Saved to Movies/AsciiCam · %.1f fps".format(fps) else "Recording failed",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                             }
                         } else {
                             viewModel.startRecording(context) { ok, diagnostic ->

@@ -1,8 +1,10 @@
 package com.llama.asciicam.ui
 
 import android.util.Log
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ZoomState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -14,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.Observer
 import com.llama.asciicam.pipeline.CameraFrameAnalyzer
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.Executors
@@ -67,8 +71,29 @@ fun CameraHost(
         }
     }
 
+    // The bound Camera, kept so its CameraControl can be driven after binding
+    // (zoom). Null whenever nothing is bound.
+    var camera by remember { mutableStateOf<Camera?>(null) }
+
+    // Pushing zoom from its own effect — rather than inside the bind block —
+    // keeps rebinding (a comparatively expensive teardown) off the path of an
+    // ordinary pinch, which streams many small updates per second.
+    LaunchedEffect(camera, viewModel.zoomRatio) {
+        val c = camera ?: return@LaunchedEffect
+        try {
+            c.cameraControl.setZoomRatio(viewModel.zoomRatio)
+        } catch (e: Exception) {
+            Log.e("CameraHost", "setZoomRatio(${viewModel.zoomRatio}) failed", e)
+        }
+    }
+
     DisposableEffect(active, useFrontCamera, provider) {
         val p = provider
+        // Held so the zoom observer can be detached again in onDispose.
+        var observedZoom: LiveData<ZoomState>? = null
+        val zoomObserver = Observer<ZoomState> { z ->
+            viewModel.reportZoomRange(z.minZoomRatio, z.maxZoomRatio)
+        }
         if (active && p != null) {
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -87,17 +112,34 @@ fun CameraHost(
             val selector = if (useFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
             try {
                 p.unbindAll()
-                p.bindToLifecycle(lifecycleOwner, selector, analysis)
+                val bound = p.bindToLifecycle(lifecycleOwner, selector, analysis)
+                camera = bound
+                // Report this camera's own zoom range — it's device-specific,
+                // and the front camera's usually stops well short of the back's.
+                //
+                // Observed rather than read once: zoomState is LiveData and is
+                // not guaranteed to hold a value the instant bindToLifecycle
+                // returns. Reading .value straight away can hand back null, and
+                // the range would then stay pinned at 1..1 — pinching would do
+                // nothing at all, with no error to show why.
+                bound.cameraInfo.zoomState.also { state ->
+                    observedZoom = state
+                    state.observe(lifecycleOwner, zoomObserver)
+                }
             } catch (e: Exception) {
                 // Camera unavailable (e.g. no front camera on this device/emulator, or in-use elsewhere).
                 Log.e("CameraHost", "Failed to bind camera (front=$useFrontCamera)", e)
+                camera = null
             }
         } else {
             p?.unbindAll()
+            camera = null
         }
 
         onDispose {
+            observedZoom?.removeObserver(zoomObserver)
             p?.unbindAll()
+            camera = null
         }
     }
 }

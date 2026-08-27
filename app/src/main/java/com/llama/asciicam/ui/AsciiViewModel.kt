@@ -78,6 +78,40 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var viewportW = 1080
     @Volatile private var viewportH = 1920
 
+    /**
+     * Camera zoom, as a CameraX zoom *ratio* (1.0 = no zoom). Applied by
+     * [CameraHost] to the bound camera's control, so it changes the frames the
+     * sensor hands to the analyzer and nothing else — the ASCII grid, its
+     * geometry and every pipeline setting are untouched, exactly as if the
+     * phone had been moved closer.
+     *
+     * [zoomMin]/[zoomMax] are reported by [CameraHost] from the bound camera,
+     * since the usable range is per-device and differs between the front and
+     * back cameras.
+     */
+    var zoomRatio by mutableStateOf(1f)
+        private set
+    private var zoomMin = 1f
+    private var zoomMax = 1f
+
+    /** Called by [CameraHost] once a camera is bound and its range is known. */
+    fun reportZoomRange(min: Float, max: Float) {
+        if (min <= 0f || max <= 0f || max < min) return
+        zoomMin = min
+        zoomMax = max
+        // A camera swap can narrow the range out from under the current value
+        // (front cameras often top out far lower than the back).
+        val clamped = zoomRatio.coerceIn(min, max)
+        if (clamped != zoomRatio) zoomRatio = clamped
+    }
+
+    /** Multiplies the current zoom by a pinch gesture's scale factor. */
+    fun onPinchZoom(scaleFactor: Float) {
+        if (!scaleFactor.isFinite() || scaleFactor <= 0f) return
+        val next = (zoomRatio * scaleFactor).coerceIn(zoomMin, zoomMax)
+        if (next != zoomRatio) zoomRatio = next
+    }
+
     fun reportViewportSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0) return
         if (viewportW == widthPx && viewportH == heightPx) return
@@ -364,15 +398,19 @@ class AsciiViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Stops an in-progress recording and finalizes the file. A no-op if not
-     * currently recording. */
-    fun stopRecording(onDone: (Boolean) -> Unit) {
+     * currently recording. [onDone]'s second argument is the frame rate the
+     * recording actually achieved, for the caller to surface. */
+    fun stopRecording(onDone: (Boolean, Double) -> Unit) {
         val recorder = videoRecorder
-        if (recorder == null) { onDone(false); return }
+        if (recorder == null) { onDone(false, 0.0); return }
         videoRecorder = null
         isRecording = false
         viewModelScope.launch(Dispatchers.Default) {
             recorder.stop()
-            withContext(Dispatchers.Main) { onDone(true) }
+            // Read after stop() returns — that joins the recording thread, so
+            // the measurement is complete by now.
+            val fps = recorder.achievedFps
+            withContext(Dispatchers.Main) { onDone(true, fps) }
         }
     }
 

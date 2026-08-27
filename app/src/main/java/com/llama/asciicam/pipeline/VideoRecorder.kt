@@ -71,11 +71,12 @@ import java.util.Locale
  * resource fails to load. So that second load was failing while the cached
  * one had already succeeded.
  *
- * A dedicated thread resamples whatever [provideFrame] currently returns at a
- * fixed [fps] and feeds it in — there's no separate rendering pass, it's the
- * same data driving the live viewfinder. All EGL/GL setup and every GL call
- * happen on that same thread (an EGL context is only usable on the thread
- * it's current on).
+ * A dedicated thread watches [provideFrame] and encodes each new frame as soon
+ * as it appears, up to [CAPTURE_MAX_FPS] — there's no separate rendering pass,
+ * it's the same data driving the live viewfinder, so the recording's frame rate
+ * is whatever the ASCII pipeline actually achieves. All EGL/GL setup and every
+ * GL call happen on that same thread (an EGL context is only usable on the
+ * thread it's current on).
  *
  * [provideFrame] deliberately doesn't reference AsciiViewModel directly, to
  * keep this class decoupled from Compose/ViewModel plumbing — the caller
@@ -89,10 +90,11 @@ class VideoRecorder(
     requestedHeight: Int,
     private val provideFrame: () -> Pair<AsciiFrameResult, GridGeometry>?,
 ) {
-    // Back to 24 from a brief 15: the drop was meant to buy the encoder
-    // headroom for an overload that turned out to be a resolution problem
-    // (below), and it visibly cost framerate for nothing.
-    private val fps = 24
+    // Nominal rate written into the encoder's format — a rate-control hint,
+    // not a cap. The loop in runLoop() submits on real elapsed timestamps and
+    // can go up to CAPTURE_MAX_FPS; the actual rate is whatever the ASCII
+    // pipeline manages to produce, which is the true ceiling here.
+    private val nominalFps = 30
 
     // The encoder's frame size, chosen by asking the device's actual H.264
     // encoder what it supports (see [chooseEncoderSize]) rather than by
@@ -128,6 +130,16 @@ class VideoRecorder(
     private val chosenSize = chooseEncoderSize(nativeWidth, nativeHeight)
     val outWidth = chosenSize.width
     val outHeight = chosenSize.height
+
+    /**
+     * Frames actually encoded per second, measured over the whole recording and
+     * final once [stop] returns. Surfaced in the "saved" toast: the recorder no
+     * longer targets a fixed rate, so this is the only honest answer to what
+     * frame rate a given recording came out at — and it's really a readout of
+     * how fast the ASCII pipeline ran, which is what limits it.
+     */
+    @Volatile var achievedFps: Double = 0.0
+        private set
 
     /** Short human-readable note on how [outWidth]x[outHeight] was arrived at
      * ("native" when no resampling happens at all). Surfaced in the recording
@@ -240,10 +252,10 @@ class VideoRecorder(
             // Scaled to the frame size actually chosen above and clamped to
             // what this encoder reports it accepts, rather than a fixed number
             // picked for one assumed resolution.
-            setInteger(MediaFormat.KEY_BIT_RATE, chooseBitRate(outWidth, outHeight, fps))
-            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            setInteger(MediaFormat.KEY_BIT_RATE, chooseBitRate(outWidth, outHeight, nominalFps))
+            setInteger(MediaFormat.KEY_FRAME_RATE, nominalFps)
         }
-        Log.i(TAG, "encoder format: ${outWidth}x$outHeight (${chosenSize.note}) from native ${nativeWidth}x$nativeHeight @${fps}fps")
+        Log.i(TAG, "encoder format: ${outWidth}x$outHeight (${chosenSize.note}) from native ${nativeWidth}x$nativeHeight, nominal ${nominalFps}fps, capture ceiling ${CAPTURE_MAX_FPS}fps")
         val enc = try {
             MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
                 configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -322,24 +334,68 @@ class VideoRecorder(
             return
         }
 
-        val frameIntervalMs = 1000L / fps
-        var nextFrameAt = System.currentTimeMillis()
+        // Event-driven rather than sampled on a fixed grid.
+        //
+        // The old loop woke on a 1000/fps millisecond schedule and encoded
+        // whatever happened to be current. Two things were wrong with that:
+        // integer division made `fps = 24` actually 1000/41 = 24.4, and more
+        // importantly, any frame the pipeline produced faster than the grid
+        // was simply thrown away — a pipeline running at 30fps lost a fifth of
+        // its frames to a 24fps sampler for no reason.
+        //
+        // Now every genuinely new frame is encoded as soon as it appears, so
+        // the recording's frame rate is whatever the ASCII pipeline actually
+        // achieves, up to CAPTURE_MAX_FPS. Timestamps are real elapsed time,
+        // so variable spacing plays back at correct speed.
+        val minFrameIntervalNanos = 1_000_000_000L / CAPTURE_MAX_FPS
+        val startNanos = System.nanoTime()
+        var lastSubmitNanos = -1L
+        var lastFrame: AsciiFrameResult? = null
+        var submittedFrames = 0
 
         while (recording) {
             drainEncoder(enc, endOfStream = false)
 
-            val now = System.currentTimeMillis()
-            if (now >= nextFrameAt) {
+            val nowNanos = System.nanoTime()
+            val sinceLastNanos = if (lastSubmitNanos < 0L) Long.MAX_VALUE else nowNanos - lastSubmitNanos
+
+            if (sinceLastNanos >= minFrameIntervalNanos) {
                 val current = provideFrame()
                 if (current != null) {
                     val (frame, geometry) = current
-                    Export.drawFrameInto(frameBitmapCanvas, frame, geometry, paint, baselineRatio, nativeWidth, nativeHeight, backgroundArgb)
-                    drawFrameToSurfaceGl()
+                    // Identity, not equality: AsciiPipeline allocates a fresh
+                    // AsciiFrameResult per processed frame, so a same-instance
+                    // read means the pipeline hasn't produced anything new and
+                    // re-rendering thousands of glyphs would be pure waste.
+                    val isNewFrame = frame !== lastFrame
+                    if (isNewFrame) {
+                        Export.drawFrameInto(
+                            frameBitmapCanvas, frame, geometry, paint, baselineRatio,
+                            nativeWidth, nativeHeight, backgroundArgb,
+                        )
+                        lastFrame = frame
+                    }
+                    // A static scene still needs the occasional frame so the
+                    // video's timeline keeps advancing and the tail of the file
+                    // isn't one endless held frame; re-presenting costs nothing
+                    // beyond a quad draw, since the texture is already uploaded.
+                    if (isNewFrame || sinceLastNanos >= IDLE_REPRESENT_NANOS) {
+                        drawFrameToSurfaceGl(
+                            presentationTimeNanos = nowNanos - startNanos,
+                            uploadTexture = isNewFrame,
+                        )
+                        lastSubmitNanos = nowNanos
+                        submittedFrames++
+                    }
                 }
-                nextFrameAt += frameIntervalMs
-                if (nextFrameAt < now) nextFrameAt = now + frameIntervalMs
             }
-            Thread.sleep(4)
+            Thread.sleep(2)
+        }
+
+        val elapsedSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
+        if (elapsedSec > 0) {
+            achievedFps = submittedFrames / elapsedSec
+            Log.i(TAG, "recorded $submittedFrames frames in ${"%.1f".format(elapsedSec)}s = ${"%.1f".format(achievedFps)} fps")
         }
 
         try {
@@ -434,7 +490,17 @@ class VideoRecorder(
         return shader
     }
 
-    private fun drawFrameToSurfaceGl() {
+    /**
+     * Draws [frameBitmap] onto the encoder's input surface and submits it at
+     * [presentationTimeNanos] (relative to the recording's start, so the file's
+     * timeline begins at zero).
+     *
+     * [uploadTexture] false re-presents the texture already on the GPU, for
+     * when the pipeline hasn't produced a new frame — re-uploading several
+     * megabytes of unchanged pixels every time would throttle the capture rate
+     * for no visible difference.
+     */
+    private fun drawFrameToSurfaceGl(presentationTimeNanos: Long, uploadTexture: Boolean) {
         GLES20.glViewport(0, 0, outWidth, outHeight)
         GLES20.glClearColor(0f, 0f, 0f, 1f)
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
@@ -442,7 +508,7 @@ class VideoRecorder(
         GLES20.glUseProgram(glProgram)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, glTexture)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, frameBitmap, 0)
+        if (uploadTexture) GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, frameBitmap, 0)
         GLES20.glUniform1i(textureUniform, 0)
 
         VERTEX_DATA.position(0)
@@ -458,7 +524,7 @@ class VideoRecorder(
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(texCoordHandle)
 
-        EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, System.nanoTime())
+        EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeNanos)
         EGL14.eglSwapBuffers(eglDisplay, eglSurface)
     }
 
@@ -480,8 +546,13 @@ class VideoRecorder(
 
     private fun drainEncoder(enc: MediaCodec, endOfStream: Boolean) {
         while (true) {
+            // Non-blocking while recording: a 10ms block here used to put a
+            // floor under the loop's iteration time, capping how promptly a
+            // newly-produced frame could be picked up. Only the final drain,
+            // which must wait for the encoder to flush, still blocks.
+            val timeoutUs = if (endOfStream) 10_000L else 0L
             val outIndex = try {
-                enc.dequeueOutputBuffer(bufferInfo, 10_000)
+                enc.dequeueOutputBuffer(bufferInfo, timeoutUs)
             } catch (e: Exception) {
                 Log.e(TAG, "dequeueOutputBuffer failed", e)
                 return
@@ -578,6 +649,22 @@ class VideoRecorder(
 
     companion object {
         private const val TAG = "VideoRecorder"
+
+        /**
+         * Upper bound on submitted frames per second. Not a target — the loop
+         * is driven by the pipeline producing new frames, and this only stops
+         * an unusually fast one from flooding the encoder. Set well above any
+         * rate the ASCII pipeline is likely to reach so it effectively never
+         * throttles; the pipeline itself is the real limit.
+         */
+        private const val CAPTURE_MAX_FPS = 60
+
+        /**
+         * When the pipeline produces nothing new, re-present the last frame at
+         * least this often so the video's timeline keeps advancing. Cheap: the
+         * texture is already on the GPU, so it's a quad draw and a swap.
+         */
+        private const val IDLE_REPRESENT_NANOS = 200_000_000L
 
         /** An encoder-accepted frame size, plus the caps it was derived from. */
         data class EncoderSize(val width: Int, val height: Int, val note: String)

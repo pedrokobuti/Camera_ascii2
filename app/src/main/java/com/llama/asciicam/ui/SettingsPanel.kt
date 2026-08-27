@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -24,6 +27,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -31,12 +35,21 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.llama.asciicam.pipeline.AsciiSettings
 import com.llama.asciicam.pipeline.ColorMode
@@ -47,6 +60,7 @@ import com.llama.asciicam.pipeline.FontChoice
 import com.llama.asciicam.pipeline.MediaSource
 import com.llama.asciicam.pipeline.NoiseType
 import com.llama.asciicam.pipeline.PaletteStop
+import java.util.Locale
 
 @Composable
 fun SettingsPanel(
@@ -257,6 +271,12 @@ private fun RowSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
+/**
+ * A slider whose value readout doubles as a text field: tapping the number
+ * turns it into an editable box so an exact value can be typed instead of
+ * dragged to. Typed input is clamped to `min..max` on commit, so the slider
+ * and the setting can never disagree or go out of range.
+ */
 @Composable
 private fun LabeledSlider(
     label: String,
@@ -266,14 +286,88 @@ private fun LabeledSlider(
     valueLabel: (Float) -> String = { "%.2f".format(it) },
     onChange: (Float) -> Unit,
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    // onFocusChanged fires once with isFocused=false the moment the field is
+    // attached, *before* focusRequester can take focus. Without this latch that
+    // first callback would immediately commit and close the editor, making the
+    // field impossible to actually type in.
+    var hasTakenFocus by remember { mutableStateOf(false) }
+
+    // Commit is deliberately reachable three ways — the keyboard's Done
+    // action, losing focus (tapping elsewhere), and the field leaving
+    // composition — because on Android any of the three can be how the user
+    // finishes typing, and a value that silently doesn't apply is worse than
+    // no typing at all. An unparseable draft just reverts to the live value.
+    fun commit() {
+        if (!editing) return
+        editing = false
+        val parsed = draft.trim().replace(',', '.').toFloatOrNull()
+        if (parsed != null && parsed.isFinite()) onChange(parsed.coerceIn(min, max))
+    }
+
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Text(label, style = MaterialTheme.typography.bodyMedium)
-            Text(valueLabel(value), style = MaterialTheme.typography.bodyMedium)
+            if (editing) {
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = LocalContentColor.current,
+                        textAlign = TextAlign.End,
+                    ),
+                    cursorBrush = SolidColor(LocalContentColor.current),
+                    keyboardOptions = KeyboardOptions(
+                        // A plain number pad has no minus key on most Android
+                        // keyboards, so ranges that go negative (brightness,
+                        // contrast, distortion speed...) get the text keyboard
+                        // instead — otherwise their lower half is untypable.
+                        keyboardType = if (min < 0f) KeyboardType.Text else KeyboardType.Number,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { commit() }),
+                    modifier = Modifier
+                        .width(72.dp)
+                        .focusRequester(focusRequester)
+                        .onFocusChanged {
+                            if (it.isFocused) hasTakenFocus = true
+                            else if (hasTakenFocus) commit()
+                        },
+                )
+                LaunchedEffect(Unit) { focusRequester.requestFocus() }
+                DisposableEffect(Unit) { onDispose { commit() } }
+            } else {
+                Text(
+                    valueLabel(value),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable {
+                        draft = value.toEditableText()
+                        hasTakenFocus = false
+                        editing = true
+                    },
+                )
+            }
         }
         Slider(value = value, onValueChange = onChange, valueRange = min..max)
     }
 }
+
+/**
+ * The value as plain editable digits — deliberately not [String.format]ted the
+ * way the display label is, since labels carry units ("%", "s") that would be
+ * re-parsed as garbage. Fixed to [Locale.US] so the decimal separator always
+ * round-trips through [String.toFloatOrNull]; a comma typed on a localized
+ * keyboard is accepted on the way back in.
+ */
+private fun Float.toEditableText(): String =
+    String.format(Locale.US, "%.2f", this).trimEnd('0').trimEnd('.')
 
 // Stacked full-width, not a horizontal row: the settings panel is only half
 // the screen wide, and 3+ pill buttons side by side there don't have room to
