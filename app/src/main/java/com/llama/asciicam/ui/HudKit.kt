@@ -50,8 +50,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import com.llama.asciicam.R
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -85,30 +87,46 @@ object Hud {
     val Accent = Color(0xFFFFFFFF)
     val Danger = Color(0xFFFF6E58)
 
+    /**
+     * The same bundled "Modern DOS 8x8" pixel font the ASCII canvas draws
+     * with (see [com.llama.asciicam.pipeline.GlyphMetrics]), used here for the
+     * chrome's own text too — the settings sheet, top/bottom bars and mode
+     * selector — so the whole app reads as one consistent typeface rather
+     * than the art using a distinct pixel font from the interface around it.
+     *
+     * A plain `FontFamily(Font(...))` rather than going through GlyphMetrics:
+     * that object's caching/fallback machinery exists for the ASCII pipeline
+     * (per-frame Paint construction, thread-safety around recording), none of
+     * which applies to a handful of Compose Text labels — Compose's own font
+     * loading here is already cached per FontFamily instance by the
+     * framework, and this is built once as a top-level val.
+     */
+    private val ModernDos = FontFamily(Font(R.font.modern_dos_8x8))
+
     /** Uppercase, wide-tracked technical label — the sheet's base voice. */
     val Label = TextStyle(
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.sp,
+        fontFamily = ModernDos,
+        fontSize = 12.sp,
         letterSpacing = 1.6.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.Normal,
     )
     val LabelLarge = TextStyle(
-        fontFamily = FontFamily.Monospace,
-        fontSize = 12.sp,
+        fontFamily = ModernDos,
+        fontSize = 14.sp,
         letterSpacing = 2.4.sp,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.Normal,
     )
     val Readout = TextStyle(
-        fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
+        fontFamily = ModernDos,
+        fontSize = 13.sp,
         letterSpacing = 0.8.sp,
-        fontWeight = FontWeight.Bold,
+        fontWeight = FontWeight.Normal,
     )
     val Title = TextStyle(
-        fontFamily = FontFamily.Monospace,
-        fontSize = 20.sp,
+        fontFamily = ModernDos,
+        fontSize = 22.sp,
         letterSpacing = 6.sp,
-        fontWeight = FontWeight.Light,
+        fontWeight = FontWeight.Normal,
     )
 }
 
