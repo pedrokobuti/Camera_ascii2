@@ -506,11 +506,16 @@ object AsciiPipeline {
         }
     }
 
-    /** Mirrors [IMPOSTER_PALETTE_STOPS] in reverse order, so an edge cell never
-     * lands on the same color as a non-edge cell at the same brightness. */
+    /** IMPOSTER mirrors [IMPOSTER_PALETTE_STOPS] in reverse order, so an edge
+     * cell never lands on the same color as a non-edge cell at the same
+     * brightness. PALETTE is its own independent stop list ([edgePaletteStops])
+     * rather than reusing [ColorMode.PALETTE]'s — edge color and cell color are
+     * already independent axes (see [ColorMode]/[EdgeColorMode] split), so
+     * giving edges their own gradient keeps that independence. */
     private fun edgeColorFor(settings: AsciiSettings, v: Float): Int = when (settings.edgeColorMode) {
         EdgeColorMode.CUSTOM -> settings.edgeColorArgb
         EdgeColorMode.IMPOSTER -> discretePaletteColor(IMPOSTER_PALETTE_STOPS.asReversed(), v)
+        EdgeColorMode.PALETTE -> paletteColor(settings.edgePaletteStops, v)
         EdgeColorMode.OFF -> settings.edgeColorArgb // unused by callers; OFF is gated before this is called
     }
 

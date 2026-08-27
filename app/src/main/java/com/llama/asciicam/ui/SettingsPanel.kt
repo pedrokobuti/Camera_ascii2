@@ -190,12 +190,22 @@ fun SettingsPanel(
                         HudRule()
                         HudCaption("Outline color")
                         HudSegmented(
-                            options = listOf("Off" to EdgeColorMode.OFF, "Custom" to EdgeColorMode.CUSTOM, "1mposter" to EdgeColorMode.IMPOSTER),
+                            options = listOf("Off" to EdgeColorMode.OFF, "Custom" to EdgeColorMode.CUSTOM),
+                            selected = settings.edgeColorMode,
+                            onSelect = { v -> set { it.copy(edgeColorMode = v) } },
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        HudSegmented(
+                            options = listOf("1mposter" to EdgeColorMode.IMPOSTER, "Palette" to EdgeColorMode.PALETTE),
                             selected = settings.edgeColorMode,
                             onSelect = { v -> set { it.copy(edgeColorMode = v) } },
                         )
                         if (settings.edgeColorMode == EdgeColorMode.CUSTOM) {
                             ColorPickerRow(argb = settings.edgeColorArgb) { c -> set { it.copy(edgeColorArgb = c) } }
+                        }
+                        if (settings.edgeColorMode == EdgeColorMode.PALETTE) {
+                            HudRule()
+                            PaletteEditor(settings.edgePaletteStops) { stops -> set { it.copy(edgePaletteStops = stops) } }
                         }
                     }
                 }

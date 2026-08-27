@@ -10,7 +10,7 @@ enum class CharSource { RAMP, WORD }
 enum class ColorMode { SOURCE, PALETTE, IMPOSTER, MONO }
 
 /** How edge-detected cells are colored, separately from [ColorMode]. */
-enum class EdgeColorMode { OFF, CUSTOM, IMPOSTER }
+enum class EdgeColorMode { OFF, CUSTOM, IMPOSTER, PALETTE }
 
 /** Where pixels for this frame come from. */
 enum class MediaSource { CAMERA, IMAGE, NOISE }
@@ -27,8 +27,12 @@ enum class NoiseType { WHITE, PERLIN, SIMPLEX, SPARSE, ALLIGATOR, CELLULAR, PLAS
  * a grid at all. Proportional system families (sans, serif, casual, cursive)
  * were briefly offered here and looked wrong for exactly that reason.
  *
- * Variety instead comes from style variants of the two monospaced families
- * Android guarantees, which stay fixed-pitch while changing weight and slant.
+ * Italic variants were also briefly offered and removed: a slanted glyph
+ * leans into its neighboring cell rather than staying inside its own column,
+ * which reads as visibly wrong for the same reason a proportional face does.
+ *
+ * Variety instead comes from weight variants of the two monospaced families
+ * Android guarantees, which stay fixed-pitch and upright.
  *
  * [systemFamily] is the family name passed to `Typeface.create`; null means
  * the bundled font resource instead.
@@ -41,11 +45,8 @@ enum class FontChoice(
     MODERN_DOS("Modern DOS 8x8"),
     MONOSPACE("Mono", "monospace"),
     MONOSPACE_BOLD("Mono Bold", "monospace", 1), // Typeface.BOLD
-    MONOSPACE_ITALIC("Mono Italic", "monospace", 2), // Typeface.ITALIC
-    MONOSPACE_BOLD_ITALIC("Mono Bold Italic", "monospace", 3), // Typeface.BOLD_ITALIC
     SERIF_MONO("Serif Mono", "serif-monospace"),
     SERIF_MONO_BOLD("Serif Mono Bold", "serif-monospace", 1),
-    SERIF_MONO_ITALIC("Serif Mono Italic", "serif-monospace", 2),
 }
 
 /**
@@ -99,6 +100,7 @@ data class AsciiSettings(
     val edgeStrength: Int = 100, // 0..200
     val edgeColorMode: EdgeColorMode = EdgeColorMode.OFF,
     val edgeColorArgb: Int = 0xFFFFFFFF.toInt(),
+    val edgePaletteStops: List<PaletteStop> = listOf(PaletteStop("#000000"), PaletteStop("#5B8CFF"), PaletteStop("#FFFFFF")),
 
     // Distortion
     val distortionType: DistortionType = DistortionType.NONE,
@@ -115,7 +117,7 @@ data class AsciiSettings(
 
     // Color mode
     val colorMode: ColorMode = ColorMode.SOURCE,
-    val paletteStops: List<PaletteStop> = listOf(PaletteStop("#000000"), PaletteStop("#5B8CFF")),
+    val paletteStops: List<PaletteStop> = listOf(PaletteStop("#000000"), PaletteStop("#5B8CFF"), PaletteStop("#FFFFFF")),
 
     // Block merge
     val merge2x2: Boolean = false,
